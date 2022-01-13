@@ -1,0 +1,186 @@
+---
+title: "Zooplankton_data_wrangling"
+author: "Patrick Pata"
+date: "20/10/2021"
+output: html_document
+---
+
+This includes code that prepares the zooplankton and environmental data set for statistical analysis. It will subset the samples that will be used in all subsequent analyses. This includes limiting the monthly period of analysis and the removing samples with low species richness. Note the cross tabulated dataframes or species matrices were based on abundance (individuals/m2) at the species-level. If biomass, or genus,etc-level analysis are desired, these can be recalculated from the zoop_sub dataframe.
+
+General workflow:
+1. Update species richness
+2. Convert abundance and biomass to /m2 + Correct euphausiid daytime net avoidance
+3. Filter samples for statistical analysis
+4. Calculate diversity metrics into a diversity dataframe
+5. Subset species and create crosstab
+6. Crosstab transformations
+7. Save wrangled data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_curated_taxa_10252021.RData"))
+load(here::here("Data_Output/zoop_net_metadata_environmental_variables_10202021.RData"))
+```
+
+# 1. Update the species richness per sample in the zoopmeta dataframe
+```{r}
+sprich <- zoop_sub %>% 
+  select(Key, Taxa.Name, Taxa.Flag) %>%
+  filter(Taxa.Flag == 1) %>%
+  droplevels() %>%
+  group_by(Key, Taxa.Name) %>%
+  count() %>%
+  group_by(Key) %>%
+  count(name = "N.Species")
+
+zoopmeta <- left_join(zoopmeta, sprich)
+
+sprichcount <- sprich %>% 
+  group_by(N.Species) %>% 
+  count()
+sprichcount$cumsum <-  cumsum(sprichcount$n)
+
+histogram(zoopmeta$N.Species)
+
+# Compare original species richness with curated taxonomy species richness
+plot(zoopmeta$NSpRaw, zoopmeta$N.Species)
+cor(zoopmeta$NSpRaw, zoopmeta$N.Species)
+
+rm(sprich, sprichcount)
+```
+
+# 2. Convert abundance and biomass to /m^2 and correct euphausiid daytime net avoidance
+```{r}
+# Correct day time values for adult euphausiids (N, F, S3 (>=10mm)) by multiplying by a factor of 3.
+ii <- which(zoop_sub$Order == "Euphausiacea" & 
+              zoop_sub$Stage %in% c("M","F","s3") &
+              zoop_sub$Twilight == "Daylight")
+
+zoop_sub$Abundance.m3[ii] <- zoop_sub$Abundance.m3[ii] * 3.0
+zoop_sub$Biomass.mg.m3[ii] <- zoop_sub$Biomass.mg.m3[ii] * 3.0
+
+# Convert to /m2
+zoop_sub <- zoop_sub %>% 
+  mutate(Abundance.m2 = Abundance.m3 * Tow.Depth,
+         Biomass.mg.m2 = Biomass.mg.m3 * Tow.Depth)
+```
+
+# 3. Filter samples for statistical analysis
+- Filter out very small species richness samples and select seasonal period
+- Exclude Taxa.Flags = c(2,3,4)
+- Select the columns of zoop_sub for abundance analysis (Note that Taxa.Name is renamed as Species)
+- Sum abundance and biomass across the curated taxa list
+```{r}
+zoopmeta <- zoopmeta %>% 
+  filter(N.Species >= 15) %>% 
+  filter(Month >= 4 & Month <= 10) %>% 
+  droplevels()
+
+zoopenvi <- zoopenvi %>% 
+  filter(Key %in% zoopmeta$Key) %>% 
+  droplevels()
+
+zoop_sub_excluded <- zoop_sub %>% 
+  filter(Key %in% zoopmeta$Key) %>% 
+  filter(Taxa.Flag == 2 | Taxa.Flag == 3) %>% 
+  droplevels() %>% 
+  select(Key, Species = Taxa.Name, Taxa.Level,
+         Abundance.m2, Biomass.mg.m2) %>% 
+  group_by(Key, Species, Taxa.Level) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2),
+            Biomass.mg.m2 = sum(Biomass.mg.m2)) %>% 
+  ungroup()
+
+
+zoop_sub <- zoop_sub %>% 
+  filter(Key %in% zoopmeta$Key) %>% 
+  filter(Taxa.Flag == 1) %>% 
+  droplevels() %>% 
+  select(Key, Species = Taxa.Name, Taxa.Level,
+         Abundance.m2, Biomass.mg.m2) %>% 
+  group_by(Key, Species, Taxa.Level) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2),
+            Biomass.mg.m2 = sum(Biomass.mg.m2)) %>% 
+  ungroup()
+
+```
+
+# 4. Calculate diversity metrics
+These are stored in a new data frame. The Shannon index (H) assumes all species are represented in a sample and species are randomly sampled and accounts for entropy. The Simpson index (D) is a dominance index. Evenness is the Pilou's evenness index.
+```{r}
+zoopdiversity <- zoop_sub %>% 
+  group_by(Key) %>% 
+  summarise(Richness = specnumber(Abundance.m2),
+            Diversity.Shannon = diversity(Abundance.m2, index = "shannon"),
+            Diversity.Simpson = diversity(Abundance.m2, index = "simpson")) %>% 
+  mutate(Evenness = Diversity.Shannon/log(Richness))
+
+# Reorder rows to match zoopmeta and zoopenvi tables
+zoopdiversity <- left_join(select(zoopmeta,Key), zoopdiversity, by = "Key")
+  
+plot(zoopdiversity$Diversity.Shannon, zoopdiversity$Richness)
+plot(zoopdiversity$Diversity.Shannon, zoopdiversity$Evenness)
+plot(zoopdiversity$Diversity.Shannon, zoopdiversity$Diversity.Simpson)
+plot(zoopdiversity$Richness, zoopdiversity$Evenness)
+```
+
+Get the presence and mean abundance of a species in the entire dataset. Then do data exploration of the subset zooplankton abundance data. 
+```{r, eval = TRUE}
+sp.abund.list <- zoop_sub %>% 
+  group_by(Species) %>% 
+  summarise(abundance.mean = mean(Abundance.m2),
+            abundance.sd = sd(Abundance.m2),
+            presence = n()) %>% 
+  mutate(presence.perc = presence / nrow(zoopmeta) * 100)
+
+# How many species are found in < 3% of the samples
+histogram( sp.abund.list$presence.perc, n = 100 )
+sum(sp.abund.list$presence.perc < 3 )
+
+# Plot abundance-presence profile
+ggplot(sp.abund.list, aes(x = presence.perc, 
+                          y = abundance.mean)) +
+  geom_pointrange(aes(ymin = abundance.mean - abundance.sd,
+                      ymax = abundance.mean + abundance.sd)) +
+  geom_vline(xintercept = 3, color = "red")
+
+```
+
+
+# 5. Subset species and create crosstab
+The presence threshold for considering a species in the analysis is presence in at least 3% of the samples.
+```{r}
+species.to.analyze <- sp.abund.list %>% 
+  filter(presence.perc > 3) 
+
+zoop_abundance <- zoop_sub %>% 
+  filter(Species %in% species.to.analyze$Species) %>% 
+  select(Key, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+# Reorder rows to match zoopmeta and zoopenvi
+zoop_abundance <- left_join(select(zoopmeta,Key), zoop_abundance, by = "Key") %>% 
+  column_to_rownames(var = "Key")
+```
+
+
+# 6. Crosstab transformations 
+```{r}
+zoop.pa <- decostand(zoop_abundance, method = "pa")
+zoop.log <- log1p(zoop_abundance)
+zoop.logchord <- decostand( zoop.log, method = "normalize")
+```
+
+# 7. Save wrangled data for statistical analysis
+```{r}
+save.image(file = here::here("Data_Output/zoop_data_for_regionalization_10252021.RData"))
+```

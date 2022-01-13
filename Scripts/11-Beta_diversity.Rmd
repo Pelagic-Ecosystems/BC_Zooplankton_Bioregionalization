@@ -1,0 +1,420 @@
+---
+title: "Beta_diversity"
+author: "Patrick Pata"
+date: "26/10/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(adespatial)
+library(ggrepel)
+library(cowplot)
+library(rnaturalearth)
+library(tictoc)
+library(reshape2)
+library(dunn.test)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+theme_set(theme_bw())
+```
+
+# 1. Species contribution and local contribution to beta-diversity.
+This is calculated using the transformed community composition matrix.
+```{r}
+betadiv.CBD <- beta.div(zoop_abundance, method = "log.chord", nperm = 9999, clock = TRUE)
+summary(betadiv.CBD)
+betadiv.CBD$beta # SSTotal and BDTotal
+
+# Which species have a SCBD larger than the mean SCBD?
+betadiv.CBD$SCBD[betadiv.CBD$SCBD > mean(betadiv.CBD$SCBD)]
+
+# how much of the total BD do the species represent
+sum(betadiv.CBD$SCBD[betadiv.CBD$SCBD > mean(betadiv.CBD$SCBD)]) / sum(betadiv.CBD$SCBD)
+```
+
+Correlate SCBD with species presence and mean abundance
+SCBD - species contribution to total beta diversity.
+```{r, fig.width=8, fig.height=10.5}
+bd.SCBD <- as.data.frame(betadiv.CBD$SCBD) %>% 
+  rownames_to_column("Species") %>% 
+  as_tibble() %>% 
+  rename(SCBD = "betadiv.CBD$SCBD") %>% 
+  left_join(sp.abund.list)
+
+cor(bd.SCBD$SCBD, bd.SCBD$presence.perc)
+cor(bd.SCBD$SCBD, log(bd.SCBD$abundance.mean))
+
+# Update sp names of some species
+bd.SCBD$Species[bd.SCBD$Species == "Metridia aff lucens"] <- "Metridia aff. lucens"
+bd.SCBD$Species[bd.SCBD$Species == "Orthoconchoecia aff striola"] <- "Orthoconchoecia aff. striola"
+
+
+# Identify species names to plot and font style
+splabels <- dplyr::filter(bd.SCBD, SCBD > mean(SCBD)) %>% 
+  left_join(dplyr::select(taxalist, Species = Taxa.Name, Taxa.Level)) %>% 
+  mutate(Taxa.Level = if_else(Taxa.Level %in% c("C","O","F"),"plain","italic")) %>% 
+  unique()
+
+
+g1 <- ggplot(bd.SCBD, aes(x = SCBD, y = presence.perc)) + 
+  geom_point(alpha = 0.6) +
+  geom_text_repel(data = splabels,
+                  aes(x = SCBD, y = presence.perc, label = Species, fontface = Taxa.Level), 
+                  max.overlaps = 15) +
+  theme_bw() +
+  ylab("% Presence in samples") +
+  theme(legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))
+
+
+g2 <- ggplot(bd.SCBD, aes(x = SCBD, y = abundance.mean)) + 
+  geom_point() +
+  theme_bw() +
+  scale_y_continuous(trans='log10') +
+  ylab("Abundance") +
+  theme(legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))
+
+
+# png(here::here(paste0("Figures/Betadiversity_SCBD_",Sys.Date(),".png")),
+#     width = 8, height = 10.5, units = "in", res = 300)
+plot_grid(g1,g2, nrow = 2, align = "v", rel_heights = c(3.5,1), labels = c("A","B"))
+# dev.off()
+```
+
+
+Local contribution to species diversity (LCBD)
+$p.adj is the Holm corrected p-value for LCBD indices. 
+```{r}
+# After holm correction, none of the sites have significant LCBDs. So the p.LCBD is used here as a filter instead to visualize the points.
+bd.LCBD <- as.data.frame(betadiv.CBD[c(3:5)]) %>% 
+  rownames_to_column("Key") %>% 
+  as_tibble() %>% 
+  left_join(dplyr::select(zoopmeta,Key,Bioregion,Longitude,Latitude,DateTime,Year)) %>% 
+  left_join(dplyr::select(zoopenvi,Key,DayOfYear)) %>% 
+  filter(p.LCBD < 0.05)
+
+# Spatial
+world <- ne_countries(scale = "medium", returnclass = "sf")
+ggplot(data = world) +
+    geom_sf() +
+    geom_point(data = bd.LCBD, aes(x = Longitude, y = Latitude, 
+                                   size = LCBD), shape = 1) +
+    coord_sf(xlim = c(-145.1, -122), ylim = c(47, 56), expand = FALSE) +
+    xlab("Longitude") + ylab("Latitude") +
+    theme_bw()
+
+# Temporal
+ggplot(data = bd.LCBD, aes(x = DayOfYear, y = Year, size = LCBD )) +
+  geom_point( shape = 1) +
+  theme_bw()
+```
+
+
+# 2. SIMPER
+Species contribution to beta diversity according to groupings. Note that this is on BCD. Pairs of groups are compared. 
+```{r}
+tic(simper)
+bd.simper <- simper(zoop.log, bioregions$Bioregion )
+toc()
+
+summary(bd.simper)
+```
+
+Extracting SIMPER results
+```{r}
+# Get overall dissimilarity between clusters
+bd.simper.overall <- as_tibble(names(bd.simper)) %>% 
+  rename(pair = "value") %>% 
+  mutate(dissim = NA)
+for (k in c(1:6)) {
+  bd.simper.overall$dissim[k] <-  bd.simper[[k]]$overall
+}
+bd.simper.overall
+
+# Get pairwise dissimilarity for each species
+bd.simper.pairs <- tibble()
+for (k in c(1:6)) {
+  A <- cbind(bd.simper[[k]]$species, bd.simper[[k]]$average, bd.simper[[k]]$sd,
+             bd.simper[[k]]$ratio, bd.simper[[k]]$ava, bd.simper[[k]]$avb,
+             bd.simper[[k]]$ord, bd.simper[[k]]$cusum)
+  A <- as_tibble(A)
+  colnames(A) <- names(bd.simper[[k]][c(1,2,4:9)])
+  A <- A %>% 
+    add_column(pair = names(bd.simper[k]), index = c(1:160), .before = "species")
+  if (k == 1){
+    bd.simper.pairs <- A
+  } else {
+    bd.simper.pairs <- bind_rows(bd.simper.pairs, A)
+  }
+}
+bd.simper.pairs[,4:10] <- sapply(bd.simper.pairs[,4:10], as.numeric)
+```
+
+Correlation between SCBD and SIMPER pairs
+```{r}
+cor(bd.simper.pairs$average, bd.simper.pairs$SCBD)
+```
+
+
+How many species to get to 50% dissimilarity? Are these high simper species the abundant/common ones?
+```{r}
+# Cumulative dissimilarity for each pair of clusters
+ggplot(data = bd.simper.pairs,
+       aes(x = index, y = cusum, color = pair)) +
+  geom_line()+
+  theme_bw()
+
+# How many species can explain 50% and 75% of the dissimilarity between pairs of bioregions?
+A <- bd.simper.pairs %>% 
+  filter(cusum >= 0.5) %>% 
+  group_by(pair) %>% 
+  summarise(nsp50 = min(index))
+B <- bd.simper.pairs %>% 
+  filter(cusum >= 0.75) %>% 
+  group_by(pair) %>% 
+  summarise(nsp75 = min(index))
+bd.simper.overall <- bd.simper.overall %>% 
+  left_join(A) %>% 
+  left_join(B)
+rm(A,B)
+range(bd.simper.overall$nsp50)
+range(bd.simper.overall$nsp75)
+ggplot(data = bd.simper.overall, aes(x = dissim, y = nsp50)) +
+  geom_point() +
+  # geom_line(mapping = aes(y = .fitted)) +
+  # geom_ribbon(mapping = aes(y = .fitted, 
+  #                           ymax = (.fitted + .se.fit), 
+  #                           ymin = (.fitted - .se.fit), 
+  #                           fill = type), 
+  #             linetype = 0, alpha = 0.5) + 
+  geom_smooth(method = "glm") +
+  geom_text_repel(aes(label = pair))
+ggplot(data = bd.simper.overall, aes(x = dissim, y = nsp75)) +
+  geom_point() +
+  # geom_line(mapping = aes(y = .fitted)) +
+  # geom_ribbon(mapping = aes(y = .fitted, 
+  #                           ymax = (.fitted + .se.fit), 
+  #                           ymin = (.fitted - .se.fit), 
+  #                           fill = type), 
+  #             linetype = 0, alpha = 0.5) + 
+  geom_smooth(method = "glm") +
+  geom_text_repel(aes(label = pair))
+# It takes 24-33 species to explain 50% of the dissimilarity between pairs of bioregions and 46-63 to explain 75%. The most similar bioregions (nearshore and deepshelf) have the least number of species to get to 50% and 75% dissimilarity.
+
+# Species explaining the top 50% dissimilarity
+A <- bd.simper.pairs %>% 
+  filter(cusum <= 0.5) 
+table(A$species)
+
+# Are high simper species abundant or common?
+ggplot(data = bd.simper.pairs,
+       aes(x = ava, y = avb, color = average)) +
+  geom_point() +
+  theme_bw() +
+  # scale_x_continuous(trans='log10') +
+  # scale_y_continuous(trans='log10') +
+  scale_color_viridis_c()
+
+# All pairs
+bd.simper.pairs <- bd.simper.pairs %>% 
+  left_join(dplyr::select(bd.SCBD, species = "Species",SCBD,
+                   abundance = "abundance.mean", presence = "presence.perc"))
+g1 <- ggplot(data = bd.simper.pairs,
+             aes(x = average, y = SCBD, color = pair)) +
+  geom_point() +
+  theme_bw()+
+  xlab("Average dissimilarity") +
+  labs("Bioregion pair") +
+  theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))
+
+g2 <- ggplot(data = bd.simper.pairs,
+             aes(x = average, y = presence, color = pair)) +
+  geom_point() +
+  theme_bw() +
+  xlab("Average dissimilarity") +
+  ylab("% Presence") +
+  labs(color = "Bioregion pair") +
+  theme(legend.position="bottom", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))
+
+plot_grid(g1,g2, nrow = 2, align = "v", rel_heights = c(1,1.3), labels = c("A","B"))
+
+png(here::here(paste0("Figures/Supp_SIMPER_",Sys.Date(),".png")),
+    width = 11, height = 9, units = "in", res = 300)
+plot_grid(g1,g2, nrow = 2, align = "v", rel_heights = c(1,1.1), labels = c("A","B"))
+dev.off()
+```
+
+# 3. Beta-diversity decomposition into replacement and richness difference components.
+Beta-diversity is calculated for the abundance dataset and for its presence-absence counterpart. The Podani indices are used with the Sorensen dissimilarity. The quantitative Sorensen dissimilarity is the percentage difference or BCD.
+```{r}
+tic("BD decomp")
+bdcomp.bcd <- beta.div.comp(zoop_abundance, coef="S", quant=TRUE)
+bdcomp.bcd.pa <- beta.div.comp(zoop_abundance, coef="S", quant=FALSE)
+bdcomp.bcd.log <- beta.div.comp(zoop.log, coef="S", quant=TRUE)
+toc()
+
+# Total beta diversity [0, 0.5] and the % contribution of each component
+bdcomp.bcd$part
+bdcomp.bcd.pa$part
+bdcomp.bcd.log$part
+
+# Extract matrix of components
+bdcomp.percdiff <- as.matrix(bdcomp.bcd$D)
+bdcomp.repl <- as.matrix(bdcomp.bcd$repl)
+bdcomp.rich <- as.matrix(bdcomp.bcd$rich)
+
+# calculate the LCBD of the replacement or richness/abundance difference components
+bdcomp.repl.lcbd <- LCBD.comp(bdcomp.repl, sqrt.D = FALSE)
+bdcomp.rich.lcbd <- LCBD.comp(bdcomp.rich, sqrt.D = FALSE)
+
+```
+
+Matrix of beta-diversity between bioregions. 
+```{r, fig.width=10, fig.height=8}
+sum.repl.ab <- (meandist(bdcomp.bcd$repl, bioregions$Bioregion))
+sum.rich.ab <- (meandist(bdcomp.bcd$rich, bioregions$Bioregion))
+sum.repl.pa <- (meandist(bdcomp.bcd.pa$repl, bioregions$Bioregion))
+sum.rich.pa <- (meandist(bdcomp.bcd.pa$rich, bioregions$Bioregion))
+
+# write.csv( gdata::combine(sum.repl.ab, sum.rich.ab, sum.repl.pa, sum.rich.pa),
+#            file = here::here("Data_Output/Bioregion_characteristics_table/Betadiv_decomposition_grouppairs_mean_matrices.csv")) 
+
+g1 <- ggplot(melt(sum.repl.pa,varnames = c("row","col")), 
+             aes(x = col, y = row, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%0.2f", round(value, digits = 2))), size = 5) +
+  labs(fill = "Replacement",x = "", y ="") +
+  scale_fill_gradient(low = "grey90", high="red") +
+  scale_x_discrete(labels = c("OS","DS","NS","DF"), position = "top") +
+  scale_y_discrete(labels = c("DF","NS","DS","OS"), limits = rev) +
+  theme(axis.text.x=element_text(size=16, face = "bold"),
+        axis.text.y=element_text(size=16, face = "bold"),
+        legend.text = element_text(size=12),
+        legend.title = element_text(size=16),
+        legend.position = "right") +
+  coord_equal(expand = FALSE)
+
+g2 <- ggplot(melt(sum.rich.pa,varnames = c("row","col")), 
+             aes(x = col, y = row, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%0.2f", round(value, digits = 2))), size = 5) +
+  labs(fill = "Richness\ndifference",x = "", y ="") +
+  # labs(fill = "Abundance\ndifference",x = "", y ="") +
+  scale_fill_gradient(low = "grey90", high="red") +
+  scale_x_discrete(labels = c("OS","DS","NS","DF"), position = "top") +
+  scale_y_discrete(labels = c("DF","NS","DS","OS"), limits = rev) +
+  theme(axis.text.x=element_text(size=16, face = "bold"),
+        axis.text.y=element_text(size=16, face = "bold"),
+        legend.text = element_text(size=12),
+        legend.title = element_text(size=16),
+        legend.position = "right") +
+  coord_equal(expand = FALSE)
+
+
+g3 <- ggplot(melt(sum.repl.ab,varnames = c("row","col")), 
+             aes(x = col, y = row, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%0.2f", round(value, digits = 2))), size = 5) +
+  labs(fill = "Replacement",x = "", y ="") +
+  scale_fill_gradient(low = "grey90", high="blue") +
+  scale_x_discrete(labels = c("OS","DS","NS","DF"), position = "top") +
+  scale_y_discrete(labels = c("DF","NS","DS","OS"), limits = rev) +
+  theme(axis.text.x=element_text(size=16, face = "bold"),
+        axis.text.y=element_text(size=16, face = "bold"),
+        legend.text = element_text(size=12),
+        legend.title = element_text(size=16),
+        legend.position = "right") +
+  coord_equal(expand = FALSE)
+
+g4 <- ggplot(melt(sum.rich.ab,varnames = c("row","col")), 
+             aes(x = col, y = row, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%0.2f", round(value, digits = 2))), size = 5) +
+  labs(fill = "Abundance\ndifference",x = "", y ="") +
+  scale_fill_gradient(low = "grey90", high="blue") +
+  scale_x_discrete(labels = c("OS","DS","NS","DF"), position = "top") +
+  scale_y_discrete(labels = c("DF","NS","DS","OS"), limits = rev) +
+  theme(axis.text.x=element_text(size=16, face = "bold"),
+        axis.text.y=element_text(size=16, face = "bold"),
+        legend.text = element_text(size=12),
+        legend.title = element_text(size=16),
+        legend.position = "right") +
+  coord_equal(expand = FALSE) 
+
+
+plot_grid(g1,g2,g3,g4, ncol = 2, align = "v", labels = c("A","B","C","D"))
+
+# png(here::here(paste0("Figures/Betadiv_podani_pa_",Sys.Date(),".png")),
+#     width = 10, height = 4, units = "in", res = 600)
+# plot_grid(g1,g2, ncol = 2, align = "v", labels = c("A","B"))
+# dev.off()
+# 
+# png(here::here(paste0("Figures/Betadiv_podani_ab_",Sys.Date(),".png")),
+#     width = 10, height = 4, units = "in", res = 600)
+# plot_grid(g3,g4, ncol = 2, align = "v", labels = c("C","D"))
+# dev.off()
+
+```
+
+
+Which samples/sites contribute the most to the replacement/richness difference component of beta diversity? 
+```{r}
+bd.LCBD.repl <- as_tibble(bdcomp.repl.lcbd$LCBD) %>% 
+  rename(LCBD = "value") %>% 
+  cbind(dplyr::select(zoopmeta,Key,Bioregion,Longitude,Latitude,DateTime,Year)) %>% 
+  left_join(dplyr::select(zoopenvi,Key,DayOfYear)) %>% 
+  filter(LCBD >= quantile(LCBD, 0.95)) # top 5%
+  
+bd.LCBD.rich <- as_tibble(bdcomp.rich.lcbd$LCBD) %>% 
+  rename(LCBD = "value") %>% 
+  cbind(dplyr::select(zoopmeta,Key,Bioregion,Longitude,Latitude,DateTime,Year)) %>% 
+  left_join(dplyr::select(zoopenvi,Key,DayOfYear)) %>% 
+  filter(LCBD >= quantile(LCBD, 0.95)) 
+  
+
+# Spatial
+world <- ne_countries(scale = "medium", returnclass = "sf")
+ggplot(data = world) +
+  geom_sf() +
+  geom_point(data = bd.LCBD.repl, aes(x = Longitude, y = Latitude, 
+                                      size = LCBD), shape = 1) +
+  coord_sf(xlim = c(-145.1, -122), ylim = c(47, 56), expand = FALSE) +
+  xlab("Longitude") + ylab("Latitude") +
+  ggtitle("Replacement LCBD")+
+  theme_bw()
+
+
+ggplot(data = world) +
+  geom_sf() +
+  geom_point(data = bd.LCBD.rich, aes(x = Longitude, y = Latitude, 
+                                      size = LCBD), shape = 1) +
+  coord_sf(xlim = c(-145.1, -122), ylim = c(47, 56), expand = FALSE) +
+  xlab("Longitude") + ylab("Latitude") +
+  ggtitle("Richness Difference LCBD") +
+  theme_bw()
+
+```
+

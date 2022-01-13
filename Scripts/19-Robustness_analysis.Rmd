@@ -1,0 +1,1089 @@
+---
+title: "Robustness_analysis"
+author: "Patrick Pata"
+date: "30/10/2021"
+output: html_document
+---
+
+Test the robustness of the k-means 4-cluster bioregionalization by randomly subsampling samples and species. Subsamples are compared to the overall bioregionalization and the % of samples within a subsample with different bioregion association are tallied.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load library and files with the original bioregionalization
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(matrixStats)
+library(here)
+`%notin%` <- Negate(`%in%`)
+source(here::here("Functions/p_biplot_pca.R"))
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+
+theme_set(theme_bw())
+```
+
+# Robustness to sampling methodology
+1. Day vs night samples, even proportion of day and night samples (random subsampling)
+2. Net types
+3. Net mouth diameter
+4. Mesh size
+```{r}
+set.seed(888)
+
+# Day vs Night
+zoopmeta %>% 
+  group_by(Twilight) %>% 
+  summarise(n = n())
+
+keys <- zoopmeta %>% 
+  dplyr::select(Twilight, Bioregion) %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+for (t in c("Daylight","Night")) {
+  ii <- which(keys$Twilight == t)
+  sub.keys <- keys[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+
+  print(paste0("Bioregionalization ",t," only: ",
+               format(round(C, 2), nsmall = 2),
+               "% classification error."))
+  
+  print(B/sum(A)*100)
+}
+
+# The same number of day and night samples (n = 773 each for 42% of samples)
+bg.twilight <- matrix(nrow = 0, ncol = 8)
+for (n in c(1:1000)){
+  ii <- which(keys$Twilight == "Night")
+  jj <- sample(filter(keys,Twilight == "Daylight")$idx, 
+               size = 773, replace = FALSE)
+  sub.keys <- keys[c(ii,jj),]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[c(ii,jj),]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  bg.twilight <- rbind(bg.twilight, c(n, nsub, nsp, C, (B/sum(A)*100)))
+}
+
+colnames(bg.twilight) <- c("n","nsub","nsp","percwrong","OS","DS","NS","DF")
+
+bg.twilight %>% 
+  as_tibble() %>% 
+  summary()
+```
+
+
+```{r}
+# Net types
+zoopmeta %>% 
+  group_by(Net.Type) %>% 
+  summarise(n = n(), np = n()/3721*100)
+
+zoopmeta %>% 
+  group_by(Net.Type, Bioregion) %>% 
+  summarise(n = n(), np = n()/3721*100)
+
+keys <- zoopmeta %>% 
+  dplyr::select(Net.Type, Bioregion) %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+
+for (t in levels(zoopmeta$Net.Type) ) {
+  ii <- which(keys$Net.Type == t)
+  sub.keys <- keys[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  print(paste0("Bioregionalization ",t," only: ",
+               format(round(C, 2), nsmall = 2),
+               "% classification error."))
+  print(B/sum(A)*100)
+}
+
+# *** non-bongo VNH ***
+ii <- which(keys$Net.Type != "Bongo VNH")
+sub.keys <- keys[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,3:4])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization non-Bongo VNH only: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+ print(B/sum(A)*100)
+
+# *** only SCOR and bongo VNH/ONH ***
+ii <- which(keys$Net.Type %in% c("SCOR VNH","Bongo VNH","Bongo ONH") )
+sub.keys <- keys[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,3:4])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization SCOR and bongo VNH/ONH only: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+print(B/sum(A)*100)
+
+
+# The same number of net types samples (n = 175 at 35/type)
+bg.nettype <- matrix(nrow = 0, ncol = 8)
+for (n in c(1:1000)){
+  ii <- which(keys$Net.Type == "Ring VNH")
+  jj <- sample(filter(keys,Net.Type == "SCOR VNH")$idx,
+               size = 35, replace = FALSE)
+  kk <- sample(filter(keys,Net.Type == "Bongo VNH")$idx,
+               size = 35, replace = FALSE)
+  ll <- sample(filter(keys,Net.Type == "Bongo ONH")$idx,
+               size = 35, replace = FALSE)
+  mm <- sample(filter(keys,Net.Type == "NorPac VNH")$idx,
+               size = 35, replace = FALSE)
+  sub.keys <- keys[c(ii,jj,kk,ll,mm),]
+
+  # recalculate log-chord table
+  sub.abund <- zoop.log[c(ii,jj,kk,ll,mm),]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion.
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+
+  bg.nettype <- rbind(bg.nettype, c(n, nsub, nsp, C, (B/sum(A)*100)))
+}
+
+colnames(bg.nettype) <- c("n","nsub","nsp","percwrong","OS","DS","NS","DF")
+
+bg.nettype %>%
+  as_tibble() %>%
+  summary()
+```
+
+
+```{r}
+# Net types
+zoopmeta %>% 
+  group_by(Net.Mouth) %>% 
+  summarise(n = n(), np = n()/3721*100)
+
+zoopmeta %>% 
+  group_by(Net.Mouth, Bioregion) %>% 
+  summarise(n = n(), np = n()/3721*100)
+
+keys <- zoopmeta %>% 
+  dplyr::select(Net.Mouth, Bioregion) %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+for (t in unique(zoopmeta$Net.Mouth) ) {
+  ii <- which(keys$Net.Mouth == t)
+  sub.keys <- keys[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  print(paste0("Bioregionalization ",t," mouth diameter only: ",
+               format(round(C, 2), nsmall = 2),
+               "% classification error."))
+  print(B/sum(A)*100)
+}
+
+# *** 0.56m and 0.58m only ***
+ii <- which(keys$Net.Mouth == 0.56 | keys$Net.Mouth == 0.58)
+# ii <- which(keys$Net.Mouth > 0.56)
+sub.keys <- keys[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,3:4])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization 0.56-0.58m mouth diameter only: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+print(B/sum(A)*100)
+
+
+# The same number of net mouth samples (n = 236 at 59/type)
+bg.nettype <- matrix(nrow = 0, ncol = 8)
+for (n in c(1:1000)){
+  ii <- filter(keys,Net.Mouth == "0.42")$idx
+  jj <- sample(filter(keys,Net.Mouth == 0.5)$idx,
+               size = 59, replace = FALSE)
+  kk <- sample(filter(keys,Net.Mouth == 0.56)$idx,
+               size = 59, replace = FALSE)
+  ll <- sample(filter(keys,Net.Mouth == 0.58)$idx,
+               size = 59, replace = FALSE)
+  sub.keys <- keys[c(ii,jj,kk,ll),]
+
+  # recalculate log-chord table
+  sub.abund <- zoop.log[c(ii,jj,kk,ll),]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion.
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+
+  bg.nettype <- rbind(bg.nettype, c(n, nsub, nsp, C, (B/sum(A)*100)))
+}
+
+colnames(bg.nettype) <- c("n","nsub","nsp","percwrong","OS","DS","NS","DF")
+
+bg.nettype %>%
+  as_tibble() %>%
+  summary()
+```
+
+
+```{r}
+# Net types (group as 200-202, 236, 250-253, 330-335)
+keys <- zoopmeta %>% 
+  dplyr::select(Mesh.Size, Bioregion) %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+keys$Mesh.Size[keys$Mesh.Size == 202] <- 200
+keys$Mesh.Size[keys$Mesh.Size == 250] <- 253
+keys$Mesh.Size[keys$Mesh.Size > 330] <- 330
+
+keys %>% 
+  group_by(Mesh.Size) %>% 
+  summarise(n = n(), np = n()/3721*100)
+
+keys %>% 
+  group_by(Mesh.Size, Bioregion) %>% 
+  summarise(n = n(), np = n()/3721*100)
+
+
+for (t in unique(keys$Mesh.Size) ) {
+  ii <- which(keys$Mesh.Size == t)
+  sub.keys <- keys[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  print(paste0("Bioregionalization ",t," mouth diameter only: ",
+               format(round(C, 2), nsmall = 2),
+               "% classification error."))
+  
+  print(B/sum(A)*100)
+}
+
+
+# 236-253 um 
+ii <- which(keys$Mesh.Size >= 236 & keys$Mesh.Size <= 253)
+sub.keys <- keys[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,3:4])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization 236-253 um mouth diameter only: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+print(B/sum(A)*100)
+
+# The same number of net mouth samples (n = 236 at 59/type)
+bg.nettype <- matrix(nrow = 0, ncol = 8)
+for (n in c(1:1000)){
+  ii <- which(keys$Mesh.Size == 200)
+  jj <- sample(filter(keys,Mesh.Size == 236)$idx,
+               size = 48, replace = FALSE)
+  kk <- sample(filter(keys,Mesh.Size == 253)$idx,
+               size = 48, replace = FALSE)
+  ll <- sample(filter(keys,Mesh.Size == 330)$idx,
+               size = 48, replace = FALSE)
+  sub.keys <- keys[c(ii,jj,kk,ll),]
+
+  # recalculate log-chord table
+  sub.abund <- zoop.log[c(ii,jj,kk,ll),]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion.
+  A <- table(sub.keys[,3:4])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+
+  bg.nettype <- rbind(bg.nettype, c(n, nsub, nsp, C, (B/sum(A)*100)))
+}
+
+colnames(bg.nettype) <- c("n","nsub","nsp","percwrong","OS","DS","NS","DF")
+
+bg.nettype %>%
+  as_tibble() %>%
+  summary()
+```
+
+
+# Robustness to temporal extent
+Number of samples per bioregion per year and per month
+```{r}
+A <- zoopmeta %>% 
+  group_by(Bioregion, Year) %>% 
+  summarise(n = n())
+ggplot(A, aes(x = Year, y = n, color = Bioregion)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = clrs.bioregion)
+
+
+B <- zoopmeta %>% 
+  group_by(Bioregion, Month) %>% 
+  summarise(n = n())
+ggplot(B, aes(x = Month, y = n, color = Bioregion)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = clrs.bioregion)
+```
+
+
+# Robustness to timespan of analysis
+Analyze by 5-year time chunk 
+```{r}
+set.seed(888)
+
+keys <- bioregions %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+bg.yearchunk <- matrix(nrow = 0, ncol = 8)
+
+
+for (y in seq(1995,2014,5)) {
+  ii <- which(zoopmeta$Year >= y & zoopmeta$Year <= y+4)
+  sub.keys <- bioregions[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,2:3])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  print(C)
+  print(B/sum(A)*100)
+
+  # Save percentages
+  bg.yearchunk <- rbind(bg.yearchunk, c(y, nsub, nsp, C, (B/sum(A)*100)))
+  
+}
+
+
+colnames(bg.yearchunk) <- c("year","nsamples","nspecies","percwrong",
+                            "OS","DS","NS","DF")
+bg.yearchunk <- as_tibble(bg.yearchunk)
+bg.yearchunk <- bg.yearchunk %>% 
+  mutate(year = as.factor(year))
+
+
+# png("Figures/SuppFig_robustness_year.png",
+    # width = 7, height = 4, units = "in", res = 300)
+ggplot(bg.yearchunk, aes(x = year, y = percwrong)) + 
+  geom_point() +
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  xlab("Year") +
+  ylab("Percent different bioregionalization")
+# dev.off()
+```
+
+Analyze by 10-year time chunk 
+```{r}
+set.seed(888)
+
+keys <- bioregions %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+bg.yearchunk <- matrix(nrow = 0, ncol = 8)
+
+
+for (y in seq(1995,2014,10)) {
+  ii <- which(zoopmeta$Year >= y & zoopmeta$Year <= y+9)
+  sub.keys <- bioregions[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,2:3])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  print(C)
+  print(B/sum(A)*100)
+
+  # Save percentages
+  bg.yearchunk <- rbind(bg.yearchunk, c(y, nsub, nsp, C, (B/sum(A)*100)))
+  
+}
+
+
+colnames(bg.yearchunk) <- c("year","nsamples","nspecies","percwrong",
+                            "OS","DS","NS","DF")
+bg.yearchunk <- as_tibble(bg.yearchunk)
+bg.yearchunk <- bg.yearchunk %>% 
+  mutate(year = as.factor(year))
+
+
+ggplot(bg.yearchunk, aes(x = year, y = percwrong)) + 
+  geom_point() +
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  xlab("Year") +
+  ylab("Percent different bioregionalization")
+```
+
+1998-2014
+```{r}
+ii <- which(zoopmeta$Year >= 1998 & zoopmeta$Year <= 2014)
+# ii <- which(zoopmeta$Year %in% seq(1995,2014,2))
+sub.keys <- bioregions[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(C)
+print(B/sum(A)*100)
+```
+
+
+# Analyze for each year
+```{r}
+set.seed(888)
+
+bg.year <- matrix(nrow = 0, ncol = 8)
+
+for (y in c(1995:2014)) {
+  ii <- which(zoopmeta$Year == y)
+  sub.keys <- bioregions[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,2:3])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  # Save percentages
+  bg.year <- rbind(bg.year, c(y, nsub, nsp, C, 
+                              (B/sum(A)*100)))
+  
+}
+
+
+colnames(bg.year) <- c("year","nsamples","nspecies","percwrong",
+                       "OS","DS","NS","DF")
+bg.year <- as_tibble(bg.year)
+bg.year <- bg.year %>% 
+  mutate(year = as.factor(year))
+
+bg.year2 <- bg.year %>% 
+  pivot_longer(cols = c("OS","DS","NS","DF"), names_to = "Bioregion",
+               values_to = "region_val") %>% 
+  mutate(Bioregion = fct_relevel(as.factor(Bioregion),
+                                 c("OS","DS","NS","DF")))
+
+# png("Figures/Supp_figs/SuppFig_robustness_year.png",
+# width = 7, height = 4, units = "in", res = 300)
+ggplot(data = bg.year2, aes(x = year, y = region_val, 
+                            color = Bioregion)) + 
+  geom_point(alpha = 0.9) + 
+  geom_point(data = bg.year, aes(x = year, y = percwrong), 
+             color = "black") +
+  scale_color_manual(values = clrs.bioregion)+
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  xlab("Year") +
+  ylab("Classification error") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+# dev.off()
+
+```
+
+# Analyze per season
+```{r}
+ii <- which(zoopmeta$Month <= 6)
+sub.keys <- bioregions[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+print(paste("Apr-June:", C))
+
+
+print(B/sum(A)*100)
+
+
+ii <- which(zoopmeta$Month > 6 & zoopmeta$Month < 10)
+sub.keys <- bioregions[ii,]
+
+# recalculate log-chord table
+sub.abund <- zoop.log[ii,]
+sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+sub.abund <- decostand( sub.abund, method = "normalize")
+nsub <- nrow(sub.abund)
+nsp <- ncol(sub.abund)
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+sub.keys$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(sub.keys[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+print(paste("July-Oct:", C))
+
+
+print(B/sum(A)*100)
+```
+
+
+# Analyze for each month
+```{r}
+set.seed(888)
+
+bg.month <- matrix(nrow = 0, ncol = 8)
+
+for (m in c(4:10)) {
+  ii <- which(zoopmeta$Month == m)
+  sub.keys <- bioregions[ii,]
+  
+  # recalculate log-chord table
+  sub.abund <- zoop.log[ii,]
+  sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+  sub.abund <- decostand( sub.abund, method = "normalize")
+  nsub <- nrow(sub.abund)
+  nsp <- ncol(sub.abund)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+  sub.keys$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys[,2:3])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  # Save percentages
+  bg.month <- rbind(bg.month, c(m, nsub, nsp, C, (B/sum(A)*100)))
+}
+
+
+colnames(bg.month) <- c("month","nsamples","nspecies","percwrong",
+                        "OS","DS","NS","DF")
+bg.month <- as_tibble(bg.month)
+bg.month <- bg.month %>% 
+  mutate(month = as.factor(month))
+
+
+bg.month2 <- bg.month %>% 
+  pivot_longer(cols = c("OS","DS","NS","DF"), names_to = "Bioregion",
+               values_to = "region_val") %>% 
+  mutate(Bioregion = fct_relevel(as.factor(Bioregion),
+                                 c("OS","DS","NS","DF")))
+
+# png(here::here("Figures/Supp_figs/SuppFig_robustness_month.png"),
+# width = 7, height = 4, units = "in", res = 300)
+ggplot(data = bg.month2, aes(x = month, y = region_val, 
+                            color = Bioregion)) + 
+  geom_point(alpha = 0.9) + 
+  geom_point(data = bg.month, aes(x = month, y = percwrong), 
+             color = "black") +
+  scale_color_manual(values = clrs.bioregion)+
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  xlab("Month") +
+  scale_x_discrete(breaks = c(4,5,6,7,8,9,10), 
+                   labels = c("April","May","June","July",
+                              "August","September","October")) +
+  ylab("Classification Error")
+# dev.off()
+
+
+
+```
+
+
+# Random subsampling with even number of sample per year (set at n=93 samples each year, 50% of all samples), will have to replace=TRUE subsampling for 1995 and 1996
+```{r}
+set.seed(888)
+# nsub <- 93 # to get total 50% of all samples
+nsub <- 78 # minimum number of samples in a year (42% of all samples)
+
+keys <- bioregions %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+bg.stratyear <- matrix(nrow = 0, ncol = 7)
+
+for (n in c(1:1000)) {
+  # Create new abundance matrix
+  sub.abund.new <- zoop.log[0,]
+  sub.keys.new <- bioregions[0,]
+  
+  for (y in c(1995:2014)) {
+    ii <- which(zoopmeta$Year == y)
+    sub.keys <- bioregions[ii,] %>% 
+      rownames_to_column("idx") %>% 
+      mutate(idx = as.numeric(idx))
+    sub.abund <- zoop.log[ii,]
+    
+    # subsample rows
+    # if (y <= 1996) {
+    #   sk <- sample(keys$idx, size = nsub, replace = TRUE)
+    # } else {
+      sk <- sample(keys$idx, size = nsub, replace = FALSE)
+    # }
+    sub.keys <- keys[sk,]
+    sub.abund <- zoop.log[sk,]
+    
+    sub.abund.new <- bind_rows(sub.abund.new, sub.abund)
+    sub.keys.new <- bind_rows(sub.keys.new, sub.keys[,2:3])
+  }
+  
+  # Bioregionalization
+  
+  # recalculate log-chord table
+  sub.abund.new <- sub.abund.new[, colSums(sub.abund.new) > 0]
+  sub.abund.new <- decostand( sub.abund.new, method = "normalize")
+  nsp <- ncol(sub.abund.new)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund.new, 4, nstart = 10, iter.max = 1000)
+  sub.keys.new$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys.new[,2:3])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  # Save percentages
+  bg.stratyear <- rbind(bg.stratyear, c(nsp, n, C, (B/sum(A)*100) ))
+}
+
+colnames(bg.stratyear) <- c("nsp","n","percwrong","OS","DS","NS","DF")
+
+bg.stratyear %>% 
+  as_tibble() %>% 
+  summary()
+
+```
+
+# Random subsampling by month (n = 266 for 50%) replace = TRUE for April
+```{r}
+
+set.seed(888)
+# nsub <- 266 # to get total 50% of all samples
+nsub <- 170 # minimum n samples per month (32%)
+
+bg.stratmonth <- matrix(nrow = 0, ncol = 7)
+
+for (n in c(1:1000)) {
+  # Create new abundance matrix
+  sub.abund.new <- zoop.log[0,]
+  sub.keys.new <- bioregions[0,]
+  
+  for (m in c(4:10)) {
+    ii <- which(zoopmeta$Month == m)
+    sub.keys <- bioregions[ii,] %>% 
+      rownames_to_column("idx") %>% 
+      mutate(idx = as.numeric(idx))
+    sub.abund <- zoop.log[ii,]
+    
+    # subsample rows
+    # if (m == 4) {
+    #   sk <- sample(keys$idx, size = nsub, replace = TRUE)
+    # } else {
+      sk <- sample(keys$idx, size = nsub, replace = FALSE)
+    # }
+    sub.keys <- keys[sk,]
+    sub.abund <- zoop.log[sk,]
+    
+    sub.abund.new <- bind_rows(sub.abund.new, sub.abund)
+    sub.keys.new <- bind_rows(sub.keys.new, sub.keys[,2:3])
+  }
+  
+  # Bioregionalization
+  
+  # recalculate log-chord table
+  sub.abund.new <- sub.abund.new[, colSums(sub.abund.new) > 0]
+  sub.abund.new <- decostand( sub.abund.new, method = "normalize")
+  nsp <- ncol(sub.abund.new)
+  
+  # cluster with K-means, 4 bioregions
+  km <- kmeans(sub.abund.new, 4, nstart = 10, iter.max = 1000)
+  sub.keys.new$newregions <- km$cluster
+  
+  # Get the % of samples with different bioregionalization
+  # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+  A <- table(sub.keys.new[,2:3])
+  B <- rowSums(A) - rowMaxs(A)
+  C <- sum(B) / sum(A) * 100
+  
+  # Save percentages
+  bg.stratmonth <- rbind(bg.stratmonth, c(nsp, n, C, (B/sum(A)*100)))
+}
+
+colnames(bg.stratmonth) <- c("nsp","n","percwrong","OS","DS","NS","DF")
+
+bg.stratmonth %>% 
+  as_tibble() %>% 
+  summary()
+
+```
+
+
+# Subsampling net samples
+levels: 5%:5%:95%, 99% of total number of samples
+```{r}
+set.seed(888)
+subp <- c(seq(.05,.95,.05), .99)
+
+keys <- bioregions %>% 
+  rownames_to_column("idx") %>% 
+  mutate(idx = as.numeric(idx))
+
+bg.subsamp <- matrix(nrow = 0, ncol = 5)
+
+for (i in subp) {
+  for (n in c(1:1000)) { # 100 iterations for each subsample level
+    nsub <- round( i * nrow(keys) )
+    
+    # subsample rows
+    sk <- sample(keys$idx, size = nsub, replace = FALSE)
+    sub.keys <- keys[sk,]
+    
+    # recalculate log-chord table
+    sub.abund <- zoop.log[sk,]
+    sub.abund <- sub.abund[, colSums(sub.abund) > 0]
+    sub.abund <- decostand( sub.abund, method = "normalize")
+    nsp <- ncol(sub.abund)
+    
+    # cluster with K-means, 4 bioregions
+    km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+    sub.keys$newregions <- km$cluster
+    
+    # Get the % of samples with different bioregionalization
+    # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+    A <- table(sub.keys[,3:4])
+    B <- rowSums(A) - rowMaxs(A)
+    C <- sum(B) / sum(A) * 100
+    
+    # Save percentages
+    bg.subsamp <- rbind(bg.subsamp, c(i, nsub, nsp, n, C))
+    
+  }
+}
+
+colnames(bg.subsamp) <- c("subp","nsamples","nspecies","iternum","percwrong")
+bg.subsamp <- as_tibble(bg.subsamp)
+bg.subsamp <- bg.subsamp %>% 
+  mutate(sperc = as.factor(subp * 100))
+
+
+png(here::here("Figures/Supp_figs/SuppFig_robustness_samples_1000iter.png"),
+width = 7, height = 4, units = "in", res = 300)
+ggplot(bg.subsamp, aes(x = sperc, y = percwrong)) + 
+  geom_boxplot() +
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  xlab("Percent of samples") +
+  ylab("Classification error")
+dev.off()
+
+```
+
+
+
+# Subsampling species
+levels: 5%:5%:95%, 99% of total number of species
+
+Note that kmeans can throw the error "Quick-TRANSfer stage steps exceeded maximum" which means it did not converge during that step. A solution is to increase nstart or use the Lloyd or MacQueen algorithms. 
+(https://stackoverflow.com/questions/21382681/kmeans-quick-transfer-stage-steps-exceeded-maximum)
+```{r}
+set.seed(888)
+subp <- c(seq(.05,.95,.05), .99)
+
+bg.subspec <- matrix(nrow = 0, ncol = 5)
+nsps <- c(1:ncol(zoop.log))
+
+for (i in subp) {
+  for (n in c(1:1000)) { # 100 iterations for each subsample level
+    nsp <- round( i * length(nsps) )
+    
+    # subsample columns
+    sk <- sample(nsps, size = nsp, replace = FALSE)
+    
+    # recalculate log-chord table
+    sub.abund <- zoop.log[,sk]
+    sub.abund <- sub.abund[rowSums(sub.abund) > 0,]
+    sub.keys <- keys[which(rowSums(sub.abund) > 0), ] #update the subset of samples
+    sub.abund <- decostand( sub.abund, method = "normalize")
+    nsub <- nrow(sub.abund)
+    
+    # cluster with K-means, 4 bioregions
+    km <- kmeans(sub.abund, 4, nstart = 10, iter.max = 1000)
+    if (km$ifault==4) { 
+      km = kmeans(sub.abund, 4, nstart = 20, iter.max = 1000,
+                  algorithm="MacQueen")
+      print(paste("Did not converge for:",i,n))
+      }
+    sub.keys$newregions <- km$cluster
+    
+    # Get the % of samples with different bioregionalization
+    # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+    A <- table(sub.keys[,3:4])
+    B <- rowSums(A) - rowMaxs(A)
+    C <- sum(B) / sum(A) * 100
+    
+    # Save percentages
+    bg.subspec <- rbind(bg.subspec, c(i, nsub, nsp, n, C))
+    
+  }
+}
+
+colnames(bg.subspec) <- c("subp","nsamples","nspecies","iternum","percwrong")
+bg.subspec <- as_tibble(bg.subspec)
+bg.subspec <- bg.subspec %>% 
+  mutate(sperc = as.factor(subp * 100))
+
+png(here::here("Figures/Supp_figs/SuppFig_robustness_species_1000iter.png"),
+    width = 7, height = 4, units = "in", res = 300)
+ggplot(bg.subspec, aes(x = sperc, y = percwrong)) + 
+  geom_boxplot() +
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  xlab("Percent of species") +
+  ylab("Classification error")
+dev.off()
+
+# ggplot(bg.subspec, aes(x = sperc, y = nsamples)) +
+#   geom_boxplot() +
+#   xlab("Percent of species") +
+#   ylab("Number of samples")
+
+
+```
+
+
+

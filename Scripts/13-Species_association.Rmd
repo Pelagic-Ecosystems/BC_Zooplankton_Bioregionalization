@@ -1,0 +1,487 @@
+---
+title: "Species_association"
+author: "Patrick Pata"
+date: "27/10/2021"
+output: html_document
+---
+
+In this species association analysis, a concordance analysis is done with the assumption that species association are hierarchically structured. The log-transformed abundances are correlated between species and the correlation matrix is then converted to a distance matrix for clustering. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+library(tictoc)
+library(factoextra)
+library(dendextend)
+library(Polychrome)
+library(fpc)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+load(here::here("Data_Output/Indicator_values_11012021.RData"))
+
+```
+
+# Correlate and cluster
+This follows steps 1-4 of the R-mode process in the kendall.global() description which is in Legendre (2012 p.395). Recommended in Borcard (2018, p. 52) in reference to Legendre (2005) that species data should be pre-transformed (box-cox series) to remove effect of total abundance per site in calculating correlations.
+
+```{r, fig.width=12, fig.height=6}
+# log-chord transformed table
+assoc.cor <- cor(zoop.logchord, method = "spearman")
+assoc.dist <- as.dist(1-assoc.cor)
+
+assoc.clust <- hclust(assoc.dist, method = "ward.D2")
+plot(assoc.clust, hang = -1, cex = 0.6)
+```
+
+# Calinski-Harabaz criterion from the species table for the number of clusters
+```{r, eval=FALSE}
+ch <- c()
+for(k in seq(1,15)){
+  clust.spe.cut <- cutree(assoc.clust, k = k) 
+  ch[k] <- calinhara(t(zoop.logchord),clust.spe.cut, k)
+}
+plot(ch)
+```
+
+# Identify the number of association groups
+```{r, fig.width=10, fig.height=5}
+ceval <- matrix(NA, nrow = 30, ncol = 8)
+for(k in seq(2,30)){
+  clust.spe.cut <- cutree(assoc.clust, k = k) 
+  cstat <- cluster.stats(assoc.dist, clust.spe.cut)
+  
+  ceval[k,1] <- cstat$avg.silwidth
+  ceval[k,2] <- cstat$ch
+  ceval[k,3] <- cstat$dunn
+  ceval[k,4] <- cstat$wb.ratio
+  ceval[k,5] <- cstat$pearsongamma  
+  ceval[k,6] <- cstat$sindex
+  ceval[k,7] <- cstat$entropy 
+  ceval[k,8] <- cstat$within.cluster.ss
+}
+
+ceval <- as.data.frame(ceval[2:30,])
+colnames(ceval) <- c("Avg.Silhouette.Width","Calinski.Harabaz","Dunn.Index",
+                     "Within.Between.Ratio","Pearson.Gamma","Separation.Index",
+                     "Entropy","Within.Sum.Squares")
+ceval <- mutate(ceval, NumClusters = c(2:30))
+
+ceval.long <- pivot_longer(ceval, -NumClusters, names_to = "Index", values_to = "Values")
+
+
+plot(assoc.clust, hang = -1, cex = 0.6)
+
+ggplot(ceval.long, aes(x = NumClusters, y = Values)) +
+  geom_point() + geom_line() +
+  theme_bw() +
+  facet_wrap(~Index, scales = "free")
+
+ggplot(filter(ceval.long, Index == "Avg.Silhouette.Width"), aes(x = NumClusters, y = Values)) +
+  geom_point() + geom_line() +
+  theme_bw()  + 
+  ylab("Average Silhouette Width") + xlab("Number of clusters")
+
+```
+
+# Plot association group clusters at various levels
+```{r, fig.width=12, fig.height=4}
+for (k in c(3:10)) {
+  dend.hel <- fviz_dend(assoc.clust, cex = 0.6, k = k,color_labels_by_k = TRUE, hang = 10, 
+                        k_colors = "d3", rect = TRUE, rect_border = "d3", rect_fill = TRUE,
+                        main = paste(k,"groups"))
+  print(dend.hel)
+}
+
+```
+
+Extract group numbers and list members of each group
+```{r}
+A <- matrix(nrow = 160, ncol = 9)
+A[,1] <- assoc.clust$labels
+for (k in c(3:10)) {
+  A[,k-1] <- cutree(assoc.clust, k = k)
+}
+A <- A[assoc.clust$order,]
+colnames(A) <- c("Species","K3","K4","K5","K6","K7","K8","K9","K10")
+assoc.groups <- as_tibble(A)
+
+rm(A)
+```
+
+Merge indicator value analysis results
+```{r}
+assoc.groups <- assoc.groups %>% 
+  left_join(indval.zoop.bioregions, by = "Species") %>% 
+  left_join(indval.zoop.AB[,c(1:4,13)], by = "Species")
+
+# write.csv(assoc.groups,
+#           file = here::here("Data_Output/Assoc_indval_allcors_wardd2_11022021.csv"))
+```
+
+# Rotating the K = 5 dendrogram for plotting
+```{r, fig.height = 6, fig.width = 15}
+dend <- fviz_dend(assoc.clust, cex = 0.6, k = 5,
+                      color_labels_by_k = TRUE, hang = 10, 
+          k_colors = "d3", rect = TRUE, rect_border = "d3", rect_fill = TRUE,
+          main = "K5")
+dend
+
+# Plotting only upper part of the dendrogram
+dend <- assoc.clust %>% as.dendrogram
+dend_h <- heights_per_k.dendrogram(dend)
+
+
+od <- tibble(Species = labels(dend), Dend.Order = order.dendrogram(dend), 
+             OG.taxa.order = c(1:160)) %>% 
+  left_join(dplyr::select(assoc.groups, Species, K5)) %>% 
+  mutate(AssocGroup = as.factor(K5)) 
+od$AssocGroup <- fct_recode(od$AssocGroup,"ZO1" = "2", "ZO2" = "4",
+                             "ZS1" = "1","ZS2"="3", "ZF" = "5")
+
+neword <- data.frame(l2r.order = c(1:5), AssocGroup = unique(od$AssocGroup), 
+                        New.l2r.order = c(2,1,5,3,4))
+od <- left_join(od,neword) %>% arrange(New.l2r.order)
+dend.r <- dendextend::rotate(dend, od$OG.taxa.order)
+
+
+dend.hel <- fviz_dend(as.hclust(dend.r), cex = 0.4, k = 5, 
+                      color_labels_by_k = TRUE, hang = 40, 
+          k_colors = "d3", rect = TRUE, rect_border = "d3", rect_fill = TRUE,
+          main = "K5-rotated")
+dend.hel
+```
+
+
+# Kendall's W coefficient  of concordance on transformed species abundance
+Global kendall test and a posteriori kendall test. The global test calculates the W and significance per group and the a posteriori test calculates the contribution of each species to its group W. The function documentation uses a hellinger transformation for the community data but here a log-chord transformation is used instead.
+```{r, eval=FALSE}
+set.seed(888)
+
+# Get association grouping according to the order of column names in data table
+asgrp <- od %>% arrange(Dend.Order) %>% dplyr::select(AssocGroup)
+asgrp <- asgrp$AssocGroup
+ken.w <- kendall.global(zoop.logchord, group = asgrp, mult="holm", nperm = 10000)
+ken.w.post <- kendall.post(zoop.logchord, group = asgrp, mult="holm", nperm = 10000)
+```
+
+# Extract the kendall W test results to a dataframe
+```{r, eval=FALSE}
+# Global test
+odnsp <-od %>% group_by(AssocGroup) %>% summarise(nsp = n())
+ken.w.tab <- as.data.frame( ken.w$Concordance_analysis ) %>%  
+  rownames_to_column(var = "Variable" ) %>% 
+  pivot_longer( -Variable,
+                names_to ="AssocGroup", values_to = "Values") %>% 
+  mutate(AssocGroup = parse_number(AssocGroup)*10) %>% 
+  mutate(AssocGroup = levels(asgrp)[AssocGroup]) %>% 
+  pivot_wider(names_from = "Variable", values_from = "Values") %>% 
+  left_join(odnsp) 
+ken.w.tab$AssocGroup <- fct_relevel(ken.w.tab$AssocGroup,
+                                    c("ZO1","ZO2","ZS1","ZS2","ZF"))
+ken.w.tab <- arrange(ken.w.tab, AssocGroup)
+
+# Posteriori test
+ken.w.post.tab <- cbind.data.frame(ken.w.post$A_posteriori_tests_Group)
+ken.w.post.tab <- as.data.frame( t(ken.w.post.tab) ) %>% 
+  rownames_to_column(var = "Species") %>% 
+  left_join(dplyr::select(od, Species, AssocGroup))
+
+```
+
+# Species association dendrogram
+```{r}
+# Set colors
+clrs.assoc.k5 <- c("turquoise4","gold3","purple4","red4","olivedrab4")
+swatch(clrs.assoc.k5)
+clrs.assoc.k5sub <- c("turquoise4","turquoise3","gold3","gold",
+                      "purple4","purple","red4","red1","olivedrab4")
+swatch(clrs.assoc.k5sub)
+
+# Updated dendrogram
+dend.hel <- fviz_dend(as.hclust(dend.r), cex = 0.4, k = 5 , 
+                      color_labels_by_k = TRUE, hang = 40, 
+                      k_colors = clrs.assoc.k5, rect_border = clrs.assoc.k5, 
+                      rect = TRUE, rect_fill = TRUE,
+                      labels_track_height = 1.3,
+                      main = "K5-rotated")
+dend.hel
+
+# png(here::here("Figures/Species_association_dendrogram_long.png"),
+#     width = 11, height = 5, units = "in", res = 600)
+# dend.hel
+# dev.off()
+```
+
+
+# Table 3 of association groups by indval cluster
+```{r}
+# Load kendal test results
+# load(here::here("Data_Output/Assoc_group_kendallresults_11022021.RData"))
+
+# Categorize subgroups within each association group based on bioregion with the highest indicator value. For ZS2: OS, DS, and DF are grouped together as ZS2-Deep which all have indvals <25 anyway. The groups are then releveled to match the color coding.
+sp.table <- indval.zoop.bioregions %>% 
+  left_join(dplyr::select(ken.w.post.tab, -Prob), by = "Species") %>%
+  mutate(AssocGroup = fct_relevel(AssocGroup, "ZO1","ZO2","ZS1","ZS2","ZF")) %>% 
+  mutate(AssocGroup.sub = paste0(AssocGroup,"-",Bioregion)) %>% 
+  mutate(AssocGroup.sub = fct_recode(AssocGroup.sub, 
+                                     "ZO1-OS" = "ZO1-Offshore",
+                                     "ZO1-DF" = "ZO1-DeepFjord",
+                                     "ZO2-OS" = "ZO2-Offshore",
+                                     "ZO2-NS" = "ZO2-Nearshore",
+                                     "ZS1-DS" = "ZS1-DeepShelf",
+                                     "ZS1-DF" = "ZS1-DeepFjord",
+                                     "ZS2-NS" = "ZS2-Nearshore",
+                                     "ZS2-Deep" = "ZS2-Offshore",
+                                     "ZS2-Deep" = "ZS2-DeepShelf", 
+                                     "ZS2-Deep" = "ZS2-DeepFjord",
+                                     "ZF" = "ZF-DeepFjord")) %>% 
+  mutate(AssocGroup.sub = fct_relevel(AssocGroup.sub,
+                                      "ZO1-OS","ZO1-DF","ZO2-OS","ZO2-NS",
+                                      "ZS1-DS","ZS1-DF","ZS2-NS","ZS2-Deep","ZF")) %>% 
+  mutate(subclustnum = fct_recode(AssocGroup.sub, 
+                                  "1" = "ZO1-OS", "2" = "ZO1-DF", "3" =  "ZO2-OS",
+                                  "4" =  "ZO2-NS", "5" =  "ZS1-DS", "6" =  "ZS1-DF",
+                                  "7" =  "ZS2-NS", "8" =  "ZS2-Deep", "9" =  "ZF")) %>% 
+  mutate(subclustnum = as.numeric(subclustnum))
+
+
+sp.table.output <- sp.table %>% 
+  arrange(indval)  %>% 
+  map_df(rev) %>% 
+  group_by(AssocGroup.sub) %>% 
+  summarise(nsp = n(), 
+            alltypes = paste0(Species," (",format(round(indval, 1), nsmall = 1),")", collapse=", t"))
+
+# write.csv(sp.table.output, 
+#           file = here::here("Data_Output/Table_3_species_assoc_indval_11022021.csv"))
+```
+
+
+Plot rotated dendrogram with leaves colored by subgroup
+```{r, fig.width=10, fig.height=5}
+a <- data.frame(AssocGroup = levels(ken.w.tab$AssocGroup),
+                AG.clr = clrs.assoc.k5)
+b <- data.frame(AssocGroup.sub = levels(sp.table$AssocGroup.sub),
+                AG.clr.sub = clrs.assoc.k5sub)
+c <- as.hclust(dend.r)
+
+spsubcolors <- data.frame(Species = c$labels[c$order],
+                          order = c$order[c$order]) %>% 
+  left_join(sp.table) %>% 
+  left_join(a) %>% 
+  left_join(b) 
+
+
+dend.hel <- fviz_dend(as.hclust(dend.r), cex = 0.4, k = 5 , hang = 40, 
+                      label_cols = spsubcolors$AG.clr.sub,
+                      k_colors = clrs.assoc.k5, 
+                      rect_border = clrs.assoc.k5, 
+                      rect = FALSE, rect_fill = FALSE,
+                      labels_track_height = 1.3,
+                      main = "K5-rotated")
+dend.hel
+
+# png(here::here("Figures/Species_association_dendrogram_long_subassoc.png")),
+#     width = 11, height = 5, units = "in", res = 600)
+# dend.hel
+# dev.off()
+```
+
+Dendrogram with colored nodes according to bioregion with highest IndVal.
+```{r, fig.width=8, fig.height=4}
+d1 <- dend.r %>% 
+  set("leaves_pch",19) %>% 
+  set("leaves_cex",0.5) %>% 
+  set("leaves_col",clrs.bioregion[spsubcolors$cluster]) %>% 
+  set("branches_lwd",2)
+
+d1 <- color_branches(d1, 5, col = clrs.assoc.k5)
+d1 <- color_branches(d1, clusters = spsubcolors$subclustnum, 
+                     col = clrs.assoc.k5sub[c(2,1,4,3,6,5,8,7,9)])
+d1 %>% 
+  set("labels",c()) %>% 
+  plot()
+
+# png(here::here("Figures/Species_association_dendrogram_colored_nodes_v2.png"),
+#     width = 9, height = 4, units = "in", res = 600)
+# d1 %>%
+#   set("labels",c()) %>%
+#   plot()
+# dev.off()
+
+```
+
+
+# Supplementary table of assoc group and indval results
+Columns are: Assoc group, nsp, (global W), subgroup, W per species, INDVAL analysis, % freq, mean abundance, sd abundance
+```{r}
+sp.table.output2 <- sp.table %>% 
+  dplyr::select(-cluster,pval) %>% 
+  left_join(dplyr::select(ken.w.tab, "AssocGroup","W"), by = "AssocGroup") %>% 
+  left_join(indval.zoop.AB[,c(1:4,13)], by = "Species") %>% 
+  left_join(sp.abund.list, by = "Species") %>% 
+  arrange(indval)  %>% 
+  map_df(rev) %>% 
+  arrange(AssocGroup.sub)
+
+# convert indval to percent
+sp.table.output2[,12:15] <- sp.table.output2[,12:15]*100
+
+# write.csv(sp.table.output2,
+#           file = here::here("Data_Output/Supp_table_species_assoc_indval_11022021.csv"))
+
+# # save kendal results
+# save(file = here::here("Data_Output/Assoc_group_kendallresults_11022021.RData"),
+#      ken.w.tab, ken.w.post.tab, clrs.assoc.k5, clrs.assoc.k5sub,
+#      dend.hel, dend.r, assoc.clust, sp.table)
+```
+
+*RESTART HERE*
+```{r}
+# Load kendal test results
+load(here::here("Data_Output/Assoc_group_kendallresults_11022021.RData"))
+```
+
+
+# NMDS of indicator value results with association group hulls
+```{r, fig.height=11, fig.width=11}
+set.seed(888)
+
+indval.nmds <- metaMDS(indval.zoop.AB[,c(5:12)])
+(indval.nmds)
+stressplot(indval.nmds)
+plot(indval.nmds, display = c("sites","species", choices = c(1,2)) )
+points(indval.nmds, display = c("sites", "species"),
+    choices = c(1,2)) 
+
+# NMDS scores for biplot
+indval.nmds.scores <- as.data.frame( scores(indval.nmds) ) %>% 
+  rownames_to_column("Species") %>% 
+  left_join(indval.zoop.bioregions) %>% 
+  mutate(Bioregion = as.factor(Bioregion)) %>% 
+  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub)) %>% 
+  ungroup()
+indval.nmds.scores$Bioregion <- fct_relevel(indval.nmds.scores$Bioregion, 
+                                            levels = c("Offshore","DeepShelf",
+                                                       "Nearshore","DeepFjord"))
+indval.nmds.scores$AssocGroup <- fct_relevel(indval.nmds.scores$AssocGroup,
+                                    c("ZO1","ZO2","ZS1","ZS2","ZF"))
+
+# Add to biplot the A & B components per cluster
+AB.fit <- envfit(indval.nmds, indval.zoop.AB[,c(5:12)], 
+                 permutations = 1000, strata = NULL,  choices=c(1,2), na.rm = TRUE)
+AB.vec <- AB.fit$vectors$arrows * sqrt(AB.fit$vectors$r)
+AB.vec <- as.data.frame(AB.vec) %>%  
+  mutate(labs = c("SPC-OS","SPC-DS","SPC-NS","SPC-DF",
+                  "FID-OS","FID-DS","FID-NS","FID-DF") )
+```
+
+NMDS plots for association group level
+```{r, fig.height=11, fig.width=11}
+
+# Update sp names of some species
+indval.nmds.scores$Species[indval.nmds.scores$Species == "Metridia aff lucens pseudopacifica"] <- "Metridia aff. lucens"
+indval.nmds.scores$Species[indval.nmds.scores$Species == "Orthoconchoecia aff striola"] <- "Orthoconchoecia aff. striola"
+
+# Identify species names to plot and font style
+splabels <- filter(indval.nmds.scores, indval >= 25, padj < 0.05) %>% 
+  left_join(dplyr::select(taxalist, Species = Taxa.Name, Taxa.Level)) %>% 
+  mutate(Taxa.Level = if_else(Taxa.Level %in% c("C","O","F"),"plain","italic")) %>% 
+  unique()
+
+# Get convex hulls
+find_hull <- function(df) df[chull(df$NMDS1, df$NMDS2), ]
+hulls <- plyr::ddply(filter(indval.nmds.scores, indval >= 25, padj < 0.05),
+                     "AssocGroup", find_hull)
+
+g1 <- ggplot(indval.nmds.scores, 
+       aes(x = NMDS1, y = NMDS2, color = AssocGroup)) +
+  geom_point(size = 3)  +
+  geom_polygon(data = hulls, aes(fill = AssocGroup), alpha=.1) +
+  scale_color_manual(values = clrs.assoc.k5) +
+  scale_fill_manual(values = clrs.assoc.k5) +
+  theme_bw() +
+  geom_text_repel(data = splabels, aes(label = Species, fontface = Taxa.Level),
+                  size = 4, max.overlaps = 21) +
+  geom_segment(data = AB.vec, aes(x = rep(0,nrow(AB.vec)), y =rep(0,nrow(AB.vec)),
+                              xend = NMDS1,yend = NMDS2),
+               lineend = "round", size = 1, colour = "black") +
+  geom_text_repel(data = AB.vec, aes(x = NMDS1, y = NMDS2, label=labs), 
+                  color="black", fontface = 'bold', size = 4) +
+  theme(legend.position = "bottom",
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))
+
+# For association subgroup level
+find_hull <- function(df) df[chull(df$NMDS1, df$NMDS2), ]
+hulls <- plyr::ddply(filter(indval.nmds.scores, indval >= 25, padj < 0.05),
+                     "AssocGroup.sub", find_hull) %>% 
+  droplevels()
+# correct colors for groups with no significant indval species
+clrs.assoc.k5sub2 <- clrs.assoc.k5sub[which(levels(indval.nmds.scores$AssocGroup.sub)
+                                            %in%
+                                              levels(hulls$AssocGroup.sub))]
+
+g2 <- ggplot(indval.nmds.scores, 
+       aes(x = NMDS1, y = NMDS2, color = AssocGroup.sub)) +
+  geom_segment(data = AB.vec, aes(x = rep(0,nrow(AB.vec)), y =rep(0,nrow(AB.vec)),
+                              xend = NMDS1,yend = NMDS2),
+               lineend = "round", size = 1, colour = "black") +
+  geom_point(size = 3)  +
+  geom_polygon(data = hulls, aes(fill = AssocGroup.sub), alpha=.1) +
+  scale_color_manual(values = clrs.assoc.k5sub, name = "Association Group") +
+  scale_fill_manual(values = clrs.assoc.k5sub2, guide = "none") +
+  theme_bw() +
+  geom_text_repel(data = splabels, aes(label = Species, fontface = Taxa.Level),
+                  size = 4, max.overlaps = 21) +
+  # geom_text_repel(data = AB.vec, aes(x = NMDS1, y = NMDS2, label=labs), 
+  #                 color="black", fontface = 'bold', size = 4) +
+  theme(legend.position = "bottom",
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))
+
+g1
+g2
+
+# png(here::here("Figures/Species_association_nmds_k5.png"),
+#     width = 11, height = 11, units = "in", res = 600)
+# g1
+# dev.off()
+# # Label arrows and revise legend in editor
+png(here::here("Figures/Species_association_nmds_k5sub.png"),
+    width = 11.5, height = 11.5, units = "in", res = 600)
+g2
+dev.off()
+```
+
+Indval nmds colored by bioregion assignment in indval. For possible subplot overlayed at upper rightside of assoc group nmds
+```{r, fig.height=5, fig.width=5}
+g3 <- ggplot(indval.nmds.scores, 
+       aes(x = NMDS1, y = NMDS2, color = Bioregion)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = clrs.bioregion) +
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.background = element_rect(fill = "transparent"), 
+        plot.background = element_rect(fill = "transparent", color = NA),)
+
+g3
+
+png(here::here("Figures/Species_association_nmds_indval.png"),
+    width = 3.5, height = 3, units = "in", res = 300)
+g3
+dev.off()
+```
+

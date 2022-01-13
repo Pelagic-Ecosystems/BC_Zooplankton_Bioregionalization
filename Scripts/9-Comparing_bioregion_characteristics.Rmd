@@ -1,0 +1,306 @@
+---
+title: "Comparing_bioregion_characteristics"
+author: "Patrick Pata"
+date: "24/10/2021"
+output: html_document
+---
+
+This creates a table that compares the physical, chemical, biological, and methodological characteristics of the bioregions. The sample size for each characteristic varies depending on the number of observations. Tests of significant difference between bioregions for each characteristic is also done.
+
+Mean total abundance and biomass are calculated both for the taxa included in the regionalization (flag = 1) and also with the excluded taxa (flag = 2,3). This does not change the relative differences between regions according to abundance or biomass but it does change the mean total magnitude of the plankton community.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(arsenal)
+library(dunn.test)
+library(broom)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+```
+
+
+Distribution of bioregion samples along the depth gradient. Density is the number of samples per depth bin, kernel is gaussian.
+```{r}
+g1 <- ggplot(zoopmeta, 
+       aes(x = Bottom.Depth, fill = Bioregion)) +
+  # geom_histogram(alpha = 0.5, position = "identity", color = "black") +
+  geom_histogram(alpha = 0.3, aes(y = ..density..), position = "identity") +
+  geom_density(alpha= 0, size = 1.2, aes(color = Bioregion)) +
+  scale_fill_manual(values = clrs.bioregion) +
+  scale_color_manual(values = clrs.bioregion) +
+  scale_x_log10(name = "Bottom Depth", breaks=c(10,25,50, 100, 250, 500, 
+                                         1000, 2000,  4000)) +
+  ylab("Density of samples") +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12))
+
+g1
+
+# png(here::here(paste0("Figures/Supp_depth_dist_",Sys.Date(),".png")),
+#     width = 8, height = 4, units = "in", res = 300)
+# g1
+# dev.off()
+```
+
+
+Biology
+```{r}
+# Get total abundance and biomass of each sample
+total.abund.biomass <- zoop_sub %>%
+  group_by(Key, Bioregion) %>%
+  summarise(TotalAbundance = sum(Abundance.m2),
+            TotalBiomasss = sum(Biomass.mg.m2))
+
+# Get total abundance and biomass of each sample with the excluded life stages (flag = 2) and broader taxonomic classification (flag = 3)
+total.abund.biomass.wEx <- zoop_sub_excluded %>%
+  left_join(bioregions) %>%
+  bind_rows(zoop_sub) %>%
+  group_by(Key, Bioregion) %>%
+  summarise(TotalAbundance.wEx = sum(Abundance.m2),
+            TotalBiomasss.wEx = sum(Biomass.mg.m2))
+
+bioregion.summary <- total.abund.biomass %>% 
+  left_join(total.abund.biomass.wEx, by = c("Key", "Bioregion"))
+
+```
+
+Diversity and Methods
+```{r}
+bioregion.summary <- bioregion.summary %>% 
+  left_join(zoopdiversity, by = c("Key", "Bioregion")) %>% 
+  left_join(dplyr::select(zoopmeta, Key, Tow.Depth, Bottom.Depth, 
+                   Tow.Ratio, Month), by = "Key") %>% 
+  mutate(Season = if_else(Month <= 6, "Spring", "Summer")) %>% 
+  ungroup() %>% 
+  dplyr::select(-c(Key,Month))
+
+bioregion.summary %>% 
+  group_by(Bioregion) %>% 
+  dplyr::summarise(n = n(),
+                   across(.cols = -c(n),
+                   list(mean = mean, sd = sd),
+                   na.rm = TRUE))
+```
+
+
+Physical and chemical
+- For dissolved oxygen and bottle measurements, only include those that were able to measure a range of >= 50% of the net tow depth or >= 45m for surface 0-50m values. Surface uses the 45m coverage threshold because surface bottle measurements may start between 2-5m. This was done to remove instances when there is only one or a few bottle depths and would not be representative of the net tow depth or surface depth.
+```{r}
+# Individually filter chemistry with sufficient coverage
+coverage.ratio <- 0.5
+
+chem.oxy <- zoopenvi %>% 
+  dplyr::filter(CoverageOxy >= coverage.ratio * Tow.Depth)%>% 
+  dplyr::select(Key, Oxygen = "Oxyg.net") 
+chem.oxy.surf <- zoopenvi %>% 
+  dplyr::filter(CoverageOxy >= 45 )%>% 
+  dplyr::select(Key, Oxygen.surf = "Oxyg.surf") 
+
+# Nitrate and Phosphate have similar coverage
+chem.nitr <- zoopenvi %>% 
+  dplyr::filter(CoverageN >= coverage.ratio * Tow.Depth)%>% 
+  dplyr::select(Key, Nitrate = "Nitr.net") 
+chem.nitr.surf <- zoopenvi %>% 
+  dplyr::filter(CoverageN >= 45 )%>% 
+  dplyr::select(Key, Nitrate.surf = "Nitr.surf") 
+
+chem.phos <- zoopenvi %>% 
+  dplyr::filter(CoverageP >= coverage.ratio * Tow.Depth)%>% 
+  dplyr::select(Key, Phosphate = "Phos.net") 
+chem.phos.surf <- zoopenvi %>% 
+  dplyr::filter(CoverageP >= 45 )%>% 
+  dplyr::select(Key, Phosphate.surf = "Phos.surf") 
+
+# There are 1-2 less observations for silicate
+chem.sili <- zoopenvi %>% 
+  dplyr::filter(CoverageSi >= coverage.ratio * Tow.Depth)%>% 
+  dplyr::select(Key, Silicate = "Sili.net") 
+chem.sili.surf <- zoopenvi %>% 
+  dplyr::filter(CoverageSi >= 45 )%>% 
+  dplyr::select(Key, Silicate.surf = "Sili.surf") 
+
+
+# **Filter physical data according to coverage**
+phychm <- zoopenvi %>% 
+  mutate(TScov = CoverageTS/Tow.Depth) %>% 
+  filter(!(Temp.surf > 0 & TScov < 0.5 & CoverageTS < 50)) %>% 
+  filter(Temp.surf > 0) %>% 
+  filter(Chla > 0) %>% 
+  filter(is.na(N2V2.030) == FALSE ) 
+
+# Merge physical and chemical dataframes
+phychm <- phychm %>% 
+  dplyr::select(Key, Bioregion,
+         Temperature = "Temp.net", Salinity = "Sali.net", CoverageTS,
+         Spice = "Spice.net", Density = "Dens.net", MLD, Stratification = "N2V2.030",
+         Chlorophyll = "Chla", Microplankton = "micro",
+         Nanoplankton = "nano", Picoplankton = "pico", ZEU, POC, PIC, PAR) %>% 
+  left_join(dplyr::select(zoopmeta, Key, Month)) %>% 
+  mutate(Season = if_else(Month <= 6, "Spring", "Summer")) %>% 
+  left_join(chem.oxy) %>% left_join(chem.oxy.surf) %>% 
+  left_join(chem.nitr) %>% left_join(chem.nitr.surf) %>% 
+  left_join(chem.phos) %>% left_join(chem.phos.surf) %>% 
+  left_join(chem.sili) %>% left_join(chem.sili.surf) %>% 
+  ungroup() %>% 
+  dplyr::select(-c(Key,Month))
+
+
+# Get number of observations of a variable
+(phychm.nobs <- colSums(!is.na(phychm)))
+
+
+phychm %>% 
+  group_by(Bioregion) %>% 
+  dplyr::summarise(n = n(),
+                   across(.cols = -c(n),
+                   list(mean = mean, sd = sd),
+                   na.rm = TRUE))
+
+```
+
+
+
+Produce summary tables and export
+```{r, eval=FALSE}
+fol <- here::here("Data_Output/Bioregion_characteristics_table/")
+
+# Raw Values
+bio.sum.raw <- bioregion.summary %>% 
+  group_by(Bioregion) %>% 
+  dplyr::summarise(n = n(),
+                   across(.cols = -c(n),
+                   list(mean = mean, sd = sd),
+                   na.rm = TRUE))
+(bio.sum.raw)
+write.csv(bio.sum.raw, file = paste0(fol,"biosum_raw_",Sys.Date(),".csv"))
+
+# Using arsenal package
+# Set table controls
+my_controls <-  tableby.control(
+  test = T,
+  total = T,
+  numeric.test = "kwt",
+  numeric.stats = c("meansd"),
+  numeric.simplify = TRUE,
+  stats.labels = list(meansd = "Mean (SD)"),
+  digits = 2
+)
+
+bio.sum.tableby <- tableby(Bioregion ~., 
+                           data = bioregion.summary,
+                           control = my_controls)
+summary(bio.sum.tableby)
+
+# Cant figure out why arsenal::write2word() function does not work so this will be exported as csv but the text labels are awful.
+write.csv(as.data.frame(summary(bio.sum.tableby)),
+          file = paste0(fol,"biomsum_tableby_2dec_",Sys.Date(),".csv"))
+
+# Raw Values
+phychm.sum.raw <- phychm %>% 
+  group_by(Bioregion) %>% 
+  dplyr::summarise(n = n(),
+                   across(.cols = -c(n),
+                   list(mean = mean, sd = sd),
+                   na.rm = TRUE))
+(phychm.sum.raw)
+write.csv(phychm.sum.raw, file = paste0(fol,"phychm_raw_2_dec",Sys.Date(),".csv"))
+
+# Table controls for physical data with missing values
+my_controls2 <-  tableby.control(
+  test = T,
+  total = T,
+  numeric.test = "kwt", cat.test = "chisq",
+  numeric.stats = c("meansd", "N"),
+  stats.labels = list(
+    meansd = "Mean (SD)",
+    N = "N"
+  ),
+  digits = 2
+)
+
+phychm.sum.tableby <- tableby(Bioregion ~., 
+                              data = phychm,
+                              control = my_controls2)
+summary(phychm.sum.tableby)
+write.csv(as.data.frame(summary(phychm.sum.tableby)),
+          file = paste0(fol,"phychm_tableby_2dec_",Sys.Date(),".csv"))
+
+
+```
+
+# Significance tests between bioregions
+Loop through each parameter of the dataframe and calculate Kruskal-Wallis H test and a post-hoc Dunn test. Store the output in a dataframe to be exported.
+```{r, eval = FALSE}
+set.seed(888)
+
+kwt.bio <- bioregion.summary %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+kwt.phychm <- phychm %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(tidy(kruskal.test(x=.$value, g =.$Bioregion)))
+
+
+# broom::tidy() does not work for the dunn.test output so this loops through each variable instead and will not save the kw test statistic.
+dunn.bio <- bioregion.summary %>% 
+  dplyr::select(-Season) %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, method = "bh")))
+dunn.phychm <- phychm %>% 
+  dplyr::select(-Season) %>% 
+  gather(key, value, -Bioregion) %>% 
+  group_by(key) %>% 
+  do(as.data.frame(dunn.test::dunn.test(x=.$value, g =.$Bioregion, method = "bh")))
+
+
+# mark if Ho is reject at p <= alpha/2, alpha = 0.05
+fol <- here::here("Data_Output/Bioregion_characteristics_table/")
+dunn.results <-  rbind(dunn.bio, dunn.phychm) %>% 
+  mutate(RejectHo = (P.adjusted <= 0.025))
+
+write.csv(file = paste0(fol,"KW_",Sys.Date(),".csv"),
+          rbind(kwt.bio, kwt.phychm))
+
+write.csv(file = paste0(fol,"Dunn_",Sys.Date(),".csv"), dunn.results)
+```
+
+
+Fitted spline of chlorophyll-a per month and bioregion
+```{r, eval = FALSE, fig.width=7, fig.height=4}
+g <- ggplot(data = phychm, aes(x = Month, y = Chlorophyll, color = Bioregion, 
+                          fill = Bioregion)) +
+  # geom_point() +
+  geom_smooth(method = "loess", size = 2) +
+  ylab(expression("Chlorophyll a " ~(mgm^-3))) +
+  scale_x_continuous(name = "Month", breaks = c(4:10), 
+                     labels = c("Apr","May","Jun","Jul","Aug","Sep","Oct")) +
+  scale_color_manual(values = clrs.bioregion) +
+  scale_fill_manual(values = clrs.bioregion) +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 14))
+g
+
+
+png(here::here("Figures/chlorophyll_monthly_spline.png"),
+    width = 7, height = 3, units = "in", res = 600)
+g
+dev.off()
+```

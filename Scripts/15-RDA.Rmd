@@ -1,0 +1,313 @@
+---
+title: "RDA"
+author: "Patrick Pata"
+date: "02/11/2021"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+library(tictoc)
+library(adespatial)
+library(corrgram)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+load(here::here("Data_Output/Assoc_group_kendallresults_11022021.RData"))
+
+theme_set(theme_bw())
+```
+
+# Select variables for global RDA
+
+The nutrients and oxygen data need to be excluded because the coverage throughout the dataset is low. Note that here, surf is the integrated 0-50m. Similar to the zooplankton sample curation based on the tow depth ratio, CTD casts which have a CTD cast-to-net tow depth ratio less than 50% of the net tow depth with less than 50m of the water column sampled are excluded. 
+```{r}
+# The number of NA records for various variables
+na_count <-sapply(zoopenvi, function(y) sum(length(which(is.na(y)))))
+(na_count <- na_count[which(na_count > 0)])
+
+vars.envi <- zoopenvi %>% 
+  mutate(TScov = CoverageTS/Tow.Depth) %>% 
+  filter(!(Temp.surf > 0 & TScov < 0.5 & CoverageTS < 50)) %>% 
+  filter(Temp.surf > 0) %>% 
+  filter(is.na(N2V2.030) == FALSE ) %>% 
+  dplyr::select(-c(starts_with(c("Coverage","Oxyg","Nitr","Pho","Sil","TScov")))) %>% 
+  dplyr::select(-c(DateTime, Twilight, Tow.Depth, Volume.Filtered.m3, Tow.Ratio, 
+            Net.Type, Net.Mouth, Mesh.Size, DayOfYear, Longitude, Latitude, 
+            Bioregion, N2V2.surf, N2V2.net))
+
+# Update the na count
+na_count <-sapply(vars.envi, function(y) sum(length(which(is.na(y)))))
+(na_count <- na_count[which(na_count > 0)])
+
+# limit by satellite data
+vars.envi <- vars.envi %>% 
+  filter(Chla > 0) %>% 
+  filter(ZEU > 0) %>% 
+  filter(POC > 0, PIC > 0)
+
+colnames(vars.envi)
+```
+
+
+For satellite data: 
+```{r, fig.height=7, fig.width=7}
+cor(dplyr::select(vars.envi[,1:12], -Key))
+
+vars.envi2 <- vars.envi[,1:12] %>% 
+  dplyr::select(-Key) %>% 
+  dplyr::select(-c(Sali.surf, Dens.surf, Spice.surf))
+corrgram(vars.envi2, 
+         order=FALSE, lower.panel=panel.pts,
+  upper.panel=panel.pie, text.panel=panel.txt,
+  diag.panel=panel.minmax,
+  main="CTD variables")
+
+vars.envi3 <- vars.envi[,13:16] 
+corrgram(vars.envi3, 
+         order=FALSE, lower.panel=panel.pts,
+  upper.panel=panel.pie, text.panel=panel.txt,
+  diag.panel=panel.minmax,
+  main="Climate variables")
+
+
+vars.envi4 <- vars.envi[,c(2,17:25)] 
+corrgram(vars.envi4, 
+         order=FALSE, lower.panel=panel.pts,
+  upper.panel=panel.pie, text.panel=panel.txt,
+  diag.panel=panel.minmax,
+  main="Satellite variables")
+```
+
+
+# Global RDA
+
+The response variable is the log-chord transformed abundance table. The box-cox transformation is necessary to apply linear methods to the abundance data.
+```{r}
+# Filter zoop data to rows in the envidata. This step also ensures that the rows are ordered similarly for these datasets.
+zoop.rda <- zoop.logchord %>% 
+  rownames_to_column("Key") %>% 
+  filter(Key %in% vars.envi$Key) %>% 
+  column_to_rownames("Key")
+
+vars.envi1 <- vars.envi %>% 
+  column_to_rownames("Key") %>% 
+  dplyr::select(-c(Temp.surf, Sali.surf, Dens.surf, Spice.surf)) %>% 
+  dplyr::select(-c(Dens.net, Spice.net, Chla, BB443, ZEU))
+
+# RDA
+rda.all <- rda(zoop.rda ~ ., vars.envi1)
+(R2adj <- RsquareAdj(rda.all)$adj.r.squared)
+# head( summary(rda.all, axes = 0) )
+```
+
+
+# Variance Inflation Factor
+Nanoplankton and microplankton have large VIF which relates to how these variables are strongly correlated.
+```{r}
+rda.vif <- vif.cca(rda.all)
+rda.vif
+```
+
+# Forward selection
+Using forward.sel() in adespatial The stopping criteria for this forward selection is if the RDA model reaches the global RDA adjusted Rsquared value, i.e., the selected variables are already sufficient in representing the variance explained by the overall set of variables.
+```{r}
+rda.fs <- forward.sel(zoop.rda, vars.envi1, adjR2thresh = R2adj)
+rda.fs
+```
+
+Merge and output forward selection and VIF
+```{r}
+a <- as.data.frame( t(rda.vif) ) %>% 
+  pivot_longer(cols = everything(), values_to = "VIF", names_to = "variables")
+rda.fs.vif <- rda.fs %>% 
+  left_join(a)
+rm(a)
+
+# write.csv(rda.fs.vif, file = here::here("Data_Output/Global_RDA_forwardsel_11042021.csv"))
+```
+
+
+# Identify variables for the final environmental RDA
+The VIF between microplankton and nanoplankton is high and since microplankton is selected first in the forward selection, Nanoplankton is excluded. Additionally, POC, MLD, and NPI are excluded because the Rsquared that these variables contribute is low ~0.002. POC also is captured by the pico- and microplankton variables while MLD is similar to surface stratification. NPI is a sea pressure index in which positive NPI indicate weaker Aleutian low and related to the PDO signal. Note that with these 10 variables, there are a bit more rows with complete data available for the RDA (3318 from 3152).
+```{r}
+# Reselect the 10 environmental variables for the final RDA
+vars.envi <- zoopenvi %>% 
+  mutate(TScov = CoverageTS/Tow.Depth) %>% 
+  filter(!(Temp.surf > 0 & TScov < 0.5 & CoverageTS < 50)) %>% 
+  filter(Temp.surf > 0) %>% 
+  filter(Chla > 0) %>% 
+  filter(is.na(N2V2.030) == FALSE ) %>% 
+  dplyr::select(Key, depth = Bottom.Depth, salinity = Sali.net, temperature = Temp.net,
+         PAR, NPGO, stratification = N2V2.030, microplankton = micro,
+         picoplankton = pico, PDO, ENSO)
+
+# Check if there are empty rows
+na_count <-sapply(vars.envi, function(y) sum(length(which(is.na(y)))))
+(na_count <- na_count[which(na_count > 0)])
+
+colnames(vars.envi)
+```
+
+# Final environmental RDA
+```{r}
+# Filter zoop data to rows in the envidata. This step also ensures that the rows are ordered similarly for these datasets.
+zoop.rda <- zoop.logchord %>% 
+  rownames_to_column("Key") %>% 
+  filter(Key %in% vars.envi$Key) %>% 
+  column_to_rownames("Key")
+
+vars.envi <- vars.envi %>% 
+  dplyr::select(-Key)
+
+# RDA
+rda.all <- rda(zoop.rda ~ ., vars.envi)
+(R2adj <- RsquareAdj(rda.all)$adj.r.squared)
+
+# Confirm VIF
+rda.vif2 <- vif.cca(rda.all)
+rda.vif2
+```
+
+Forward selection without a stopping criterion to order the environmental parameters in the final RDA model. Adding a stopping criterion will still result in the same thing.
+```{r}
+rda.fs2 <- forward.sel(zoop.rda, vars.envi)
+rda.fs2
+
+a <- as.data.frame( t(rda.vif2) ) %>% 
+  pivot_longer(cols = everything(), values_to = "VIF", names_to = "variables")
+rda.fs.vif2 <- rda.fs2 %>% 
+  left_join(a)
+rm(a)
+
+# write.csv(rda.fs.vif2, file = here::here("Data_Output/Final_RDA_forwardsel_11042021.csv"))
+```
+
+Correlogram of the final set of variables
+```{r, fig.width=8, fig.height=6}
+corrgram(vars.envi, 
+         order=FALSE, lower.panel=panel.pts,
+  upper.panel=panel.pie, text.panel=panel.txt,
+  diag.panel=panel.minmax,
+  main="Final RDA variables")
+```
+
+Permutation test of the RDA
+This chunk will take a while to run. The permutation tests result in a significant global RDA model (0.001***) with F of 81.513. The test of canonical axes also result in all axes being significant (0.001).
+```{r, eval=FALSE}
+set.seed(888)
+# Global test
+rda.anova1 <- anova(rda.all, permutations = how(nperm = 999))
+rda.anova1
+
+# Test of canonical axes
+rda.anova2 <- anova(rda.all, by = "axis", permutations = how(nperm = 999))
+rda.anova2
+
+# Check for significant unconstrained axes using the  Kaiser-Guttman criterion 
+rda.all$CA$eig[rda.all$CA$eig > mean(rda.all$CA$eig)]
+
+# Output
+# write.csv(bind_rows(rda.anova1,rda.anova2),
+#           file = here::here("Data_Output/Environmental_RDA_permutation_test.csv"))
+
+```
+
+
+# RDA Biplot without species points
+```{r, fig.width=12, fig.height=6}
+# variance explained of the constrained axes
+varexp.RDA <- round( rda.all$CCA$eig/rda.all$tot.chi*100, digits = 1)
+head(varexp.RDA)    
+
+# variance explained of the unconstrained axes
+varexp.PC <- round( rda.all$CA$eig/rda.all$tot.chi*100, digits = 1)
+head(varexp.PC)    
+
+# Scaling 2 is a correlation triplot... angles between arrows reflect correlations.
+rda.scores.arrows <- scores(rda.all, choices = c(1:4), display = "bp", scaling = 2) 
+rda.scores.sites <- scores(rda.all, choices = c(1:4), display = "lc", scaling = 2) 
+
+rda.scores.sites <- as.data.frame(rda.scores.sites) %>% 
+  rownames_to_column("Key") %>% 
+  left_join(bioregions)
+
+rda.arrow.df <- data.frame(variable = rownames(rda.scores.arrows),
+                           x1 = rep(0,nrow(rda.scores.arrows)),
+                           y1 =rep(0,nrow(rda.scores.arrows)), 
+                           xend = rda.scores.arrows[,1],
+                           yend = rda.scores.arrows[,2])
+      
+g1 <- ggplot(rda.scores.sites, 
+       aes_string("RDA1", "RDA2", colour = "Bioregion")) + 
+  geom_point(size = 3, alpha = 0.3, shape = 16) + 
+  stat_ellipse(size = 1.5,show.legend = FALSE,level = 0.9) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16)) + 
+  labs(x = paste0("RDA1 (",varexp.RDA[1],"%)"), 
+       y = paste0("RDA2 (",varexp.RDA[2], "%)" )) +
+  scale_color_manual(values = clrs.bioregion, name = "Bioregion") +
+  geom_segment(data = rda.arrow.df, aes(x = x1, y = y1, 
+                                        xend = xend, yend = yend),
+               lineend = "round", size = 1, colour = "black",
+               arrow = arrow(length = unit(0.2, "cm"))) +
+  geom_text_repel(data = rda.arrow.df, aes(x = xend, y = yend,
+                                           label=variable), 
+                  color="black", size = 5) +
+  scale_x_reverse()
+
+
+rda.arrow.df <- data.frame(variable = rownames(rda.scores.arrows),
+                           x1 = rep(0,nrow(rda.scores.arrows)),
+                           y1 =rep(0,nrow(rda.scores.arrows)), 
+                           xend = rda.scores.arrows[,3],
+                           yend = rda.scores.arrows[,4])
+      
+g2 <- ggplot(rda.scores.sites, 
+       aes_string("RDA3", "RDA4", colour = "Bioregion")) + 
+  geom_point(size = 3, alpha = 0.3, shape = 16) + 
+  stat_ellipse(size = 1.5,show.legend = FALSE,level = 0.9) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16)) + 
+  labs(x = paste0("RDA3 (",varexp.RDA[3],"%)"), 
+       y = paste0("RDA4 (",varexp.RDA[4], "%)" )) +
+  scale_color_manual(values = clrs.bioregion, name = "Bioregion") +
+  geom_segment(data = rda.arrow.df, aes(x = x1, y = y1, 
+                                        xend = xend, yend = yend),
+               lineend = "round", size = 1, colour = "black",
+               arrow = arrow(length = unit(0.2, "cm"))) +
+  geom_text_repel(data = rda.arrow.df, aes(x = xend, y = yend,
+                                           label=variable), 
+                  color="black", size = 5) 
+
+
+plot_grid(g1,g2, ncol = 2, align = "h")
+
+# pdf(here::here("Figures/RDA_bioregions_011102022.pdf"),
+#     width = 12, height = 6) #, units = "in", res = 600)
+# plot_grid(g1,g2, ncol = 2, align = "h")
+# dev.off()
+```

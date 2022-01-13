@@ -1,0 +1,513 @@
+---
+title: "Abundance_timeseries"
+author: "Patrick Pata"
+date: "02/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+library(tictoc)
+library(ggbreak)
+library(gcookbook)
+library(cowplot)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+load(here::here("Data_Output/Assoc_group_kendallresults_11022021.RData"))
+
+theme_set(theme_bw())
+```
+
+# Average and relative composition of abundance and biomass by bioregion and season
+```{r, fig.width=10, fig.height=9}
+bioreg.seas <- bioregions %>% 
+  left_join(dplyr::select(zoopmeta,Key,Month, Year)) %>% 
+  mutate(Season = if_else(Month <= 6, "Spring","Summer")) %>% 
+  mutate(BioSeas = paste(Bioregion,Season)) %>% 
+  dplyr::select(-c(Bioregion,Month)) %>% 
+  mutate(BioSeas = fct_recode(
+    BioSeas, "OS_Spr" = "Offshore Spring", "OS_Sum" = "Offshore Summer",
+    "DS_Spr" = "DeepShelf Spring", "DS_Sum" = "DeepShelf Summer",
+    "NS_Spr" = "Nearshore Spring", "NS_Sum" = "Nearshore Summer",
+    "DF_Spr" = "DeepFjord Spring", "DF_Sum" = "DeepFjord Summer")) %>% 
+  mutate(BioSeas = fct_relevel(BioSeas, "OS_Spr","OS_Sum","DS_Spr","DS_Sum",
+                               "NS_Spr","NS_Sum","DF_Spr","DF_Sum"))
+
+# Get average of bioregion-season-year first like in the time series and then average across all years
+bar.all <- zoop_sub %>% 
+  left_join(select(sp.table, Species, AssocGroup, AssocGroup.sub), 
+            by = "Species") %>% 
+  left_join(bioreg.seas, by = "Key") %>% 
+  group_by(Key, BioSeas, Year, AssocGroup.sub ) %>% 
+  summarise(Abundance = sum(Abundance.m2), Biomass = sum(Biomass.mg.m2)) %>% 
+  group_by(BioSeas, Year, AssocGroup.sub) %>% 
+  summarise(Abundance = mean(Abundance), Biomass = mean(Biomass)) %>% 
+  group_by(BioSeas, AssocGroup.sub) %>% 
+  summarise(Abundance = mean(Abundance), Biomass = mean(Biomass)) %>% 
+  ungroup() %>% 
+  filter(!is.na(AssocGroup.sub))
+
+
+nsamp <- zoopmeta %>% 
+  left_join(bioreg.seas, by = "Key") %>% 
+  group_by(BioSeas) %>% 
+  summarise(nsamples = n())
+
+bar.label <- bar.all %>% 
+  group_by(BioSeas) %>% 
+  summarise(Abundance.total = sum(Abundance),
+            Biomass.total = sum(Biomass)) %>% 
+  left_join(nsamp, by = "BioSeas")
+
+
+g1 <- ggplot(bar.all, aes(x=BioSeas, y=Abundance, fill=AssocGroup.sub)) +
+  geom_bar(position = "stack", stat="identity") +
+  geom_text(data = bar.label, 
+            aes(label=nsamples, fill = NULL, x = BioSeas, y = Abundance.total),
+            nudge_y=7000, size = 5) +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16),
+        legend.position = "none")+
+  ylab("Average Abundance") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values= clrs.assoc.k5sub ) +
+  scale_y_continuous(expand = c(0, 0), breaks = c(0,5,10,15)*10000, 
+                     limits = c(0,190000))+
+  scale_x_discrete(expand = c(0,0.5), name = "Bioregion - Season",
+                     labels = c("OS\nSpr","OS\nSum","DS\nSpr","DS\nSum",
+                               "NS\nSpr","NS\nSum","DF\nSpr","DF\nSum"))
+
+g2 <- ggplot(bar.all, aes(x=BioSeas, y=Abundance, fill=AssocGroup.sub)) +
+  geom_bar(position = "fill", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16),
+        legend.position = "none")+
+  ylab("% Abundance") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values= clrs.assoc.k5sub ) +
+  scale_y_continuous(expand = c(0, 0), labels = scales::percent)+
+  scale_x_discrete(expand = c(0,0.5), name = "Bioregion - Season",
+                     labels = c("OS\nSpr","OS\nSum","DS\nSpr","DS\nSum",
+                               "NS\nSpr","NS\nSum","DF\nSpr","DF\nSum"))
+g3 <- ggplot(bar.all, aes(x=BioSeas, y=Biomass, fill=AssocGroup.sub)) +
+  geom_bar(position = "stack", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16),
+        legend.position = "none")+
+  ylab("Average Biomass") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values= clrs.assoc.k5sub ) +
+  scale_y_continuous(expand = c(0, 0))+
+  scale_x_discrete(expand = c(0,0.5), name = "Bioregion - Season",
+                     labels = c("OS\nSpr","OS\nSum","DS\nSpr","DS\nSum",
+                               "NS\nSpr","NS\nSum","DF\nSpr","DF\nSum"))
+g4 <- ggplot(bar.all, aes(x=BioSeas, y=Biomass, fill=AssocGroup.sub)) +
+  geom_bar(position = "fill", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16),
+        legend.position = "top")+
+  ylab("% Biomass") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values= clrs.assoc.k5sub ) +
+  scale_y_continuous(expand = c(0, 0), labels = scales::percent)+
+  scale_x_discrete(expand = c(0,0.5), name = "Bioregion - Season",
+                     labels = c("OS\nSpr","OS\nSum","DS\nSpr","DS\nSum",
+                               "NS\nSpr","NS\nSum","DF\nSpr","DF\nSum"))
+
+g5 <- g4 + theme(legend.position = "none")
+
+pg <- plot_grid(g1,g2,g3,g5, align = "hv", labels = c("A","B","C","D"))
+
+# add only one legend to cowplot
+legend <- get_legend( g4 )
+plot_grid(legend, pg, ncol = 1, rel_heights = c(.5, 4))
+
+# png(here::here(paste0("Figures/Composition_abund_biom_season_",Sys.Date(),".png")),
+#     width = 12, height = 9, units = "in", res = 300)
+# plot_grid(legend, pg, ncol = 1, rel_heights = c(.5, 4))
+# dev.off()
+```
+
+# Overall average abundance per bioregion
+```{r}
+# Evenly represent seasons and years
+bar.all <- zoop_sub %>% 
+  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
+            by = "Species") %>% 
+  left_join(bioreg.seas, by = "Key") %>% 
+  group_by(Key, Bioregion, Season, Year, AssocGroup.sub ) %>% 
+  summarise(Abundance = sum(Abundance.m2), Biomass = sum(Biomass.mg.m2)) %>% 
+  group_by(Bioregion, Season, AssocGroup.sub) %>% 
+  summarise(Abundance = mean(Abundance), Biomass = mean(Biomass)) %>% 
+  group_by(Bioregion, AssocGroup.sub) %>% 
+  summarise(Abundance = mean(Abundance), Biomass = mean(Biomass)) %>% 
+  ungroup() %>% 
+  filter(!is.na(AssocGroup.sub))
+
+
+g1 <- ggplot(bar.all, aes(x=Bioregion, y=Abundance, fill=AssocGroup.sub)) +
+  geom_bar(position = "stack", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))+
+  ylab("Average Abundance") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values= clrs.assoc.k5sub ) +
+  scale_y_continuous(expand = c(0, 0), breaks = c(0,5,10,15)*10000)+
+  scale_x_discrete(expand = c(0,0.5))
+
+g1
+
+g2 <- ggplot(bar.all, aes(x=Bioregion, y=Biomass, fill=AssocGroup.sub)) +
+  geom_bar(position = "stack", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16))+
+  ylab("Average Biomass") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values= clrs.assoc.k5sub ) +
+  scale_y_continuous(expand = c(0, 0))+
+  scale_x_discrete(expand = c(0,0.5))
+
+g2
+```
+
+# Mean abundance composition timeseries
+```{r, fig.width=10, fig.height=8}
+bar.ts <- zoop_sub %>% 
+  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
+            by = "Species") %>% 
+  left_join(dplyr::select(zoopmeta, Key, Year, Month), by = "Key") %>% 
+  left_join(dplyr::select(zoopenvi, Key, DayOfYear), by = "Key") %>% 
+  mutate(YearSeason = Year + (floor(DayOfYear/181)*0.5) ) %>% 
+  group_by(Key, Bioregion, AssocGroup.sub, YearSeason ) %>% 
+  summarise(Abundance = sum(Abundance.m2),
+            Biomass = sum(Biomass.mg.m2)) %>% 
+  group_by(Bioregion, AssocGroup.sub, YearSeason ) %>% 
+  summarise(Abundance = mean(Abundance),
+            Biomass = mean(Biomass)) %>% 
+  ungroup() %>% 
+  filter(!is.na(AssocGroup.sub))
+
+nsamp <- zoopmeta %>% 
+  left_join(select(zoopenvi, Key, DayOfYear), by = "Key") %>% 
+  mutate(YearSeason = Year + (floor(DayOfYear/181)*0.5) ) %>% 
+  group_by(Bioregion, YearSeason) %>% 
+  summarise(nsamples = n())
+
+bar.ts.label <- bar.ts %>% 
+  group_by(Bioregion, YearSeason ) %>% 
+  summarise(Abundance.total = sum(Abundance),
+            Biomass.total = sum(Biomass)) %>% 
+  left_join(nsamp, by = c("Bioregion", "YearSeason"))
+
+# Abundance
+g3 <- ggplot(bar.ts, aes(x=YearSeason, y=Abundance, fill=AssocGroup.sub)) +
+  geom_bar(position = "stack", stat="identity") +
+  geom_text(data = bar.ts.label, aes(label=nsamples, fill = NULL,
+                                     x = YearSeason, y = Abundance.total),
+            nudge_y=20000) +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        legend.position = "top",
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90))+ xlab("Year") +
+  ylab("Average Abundance (indivs m\u207B\u00B2)") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values=as.vector(clrs.assoc.k5sub)  )+
+  scale_x_continuous(breaks = seq(1995, 2014, by = 1))  +
+  coord_cartesian(xlim = c(1995.5,2014)) +
+  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left")
+
+# Needs gcookbook package
+g3 <- g3 + theme(strip.text = element_text(face = "bold", size = rel(1.5)))
+g3
+
+# This will not display the plot in markdown but will print to file
+g <- ggplot_gtable(ggplot_build(g3))
+stripr <- which(grepl('strip-l', g$layout$name))
+k <- 1
+for (i in stripr) {
+  j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+  g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- clrs.bioregion[k]
+  k <- k+1
+}
+
+png(here::here(paste0("Figures/Composition_Abundance_timeseries_",Sys.Date(),".png")),
+    width = 10.5, height = 8, units = "in", res = 300)
+grid::grid.draw(g)
+dev.off()
+```
+
+
+# Percent composition
+```{r, fig.width=10, fig.height=8}
+g4 <- ggplot(bar.ts, aes(x=YearSeason, y=Abundance, fill=AssocGroup.sub)) +
+  geom_bar(position = "fill", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        legend.position = "top",
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90))+ xlab("Year") +
+  ylab("% Average Abundance") + 
+  scale_fill_manual(name="Sp Assoc", 
+                    values=clrs.assoc.k5sub)+ 
+  scale_y_continuous(labels = scales::percent)  + 
+  scale_x_continuous(breaks = seq(1995, 2014, by = 1)) +
+  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left") +
+  coord_cartesian(xlim = c(1995.5,2014))
+
+# Needs gcookbook package
+g4 <- g4 + theme(strip.text = element_text(face = "bold", size = rel(1.5)))
+g4
+
+# This will not display the plot in markdown but will print to file
+g <- ggplot_gtable(ggplot_build(g4))
+stripr <- which(grepl('strip-l', g$layout$name))
+k <- 1
+for (i in stripr) {
+  j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+  g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- clrs.bioregion[k]
+  k <- k+1
+}
+
+
+png(here::here(paste0("Figures/Composition_Abundance_percent_timeseries_",
+                      Sys.Date(),".png")),
+    width = 10.5, height = 8, units = "in", res = 300)
+grid::grid.draw(g)
+dev.off()
+```
+
+
+```{r, fig.width=10, fig.height=8}
+# Biomass
+g5 <- ggplot(bar.ts, aes(x=YearSeason, y=Biomass, fill=AssocGroup.sub)) +
+  geom_bar(position = "stack", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        legend.position = "top",
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90))+ xlab("Year") +
+  ylab("Average Biomass (mg m\u207B\u00B2)") +
+  scale_fill_manual(name="Sp Assoc", 
+                    values=as.vector(clrs.assoc.k5sub)  )+
+  scale_x_continuous(breaks = seq(1995, 2014, by = 1)) +
+  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left") +
+  coord_cartesian(xlim = c(1995.5,2014)) 
+
+# Needs gcookbook package
+g5 <- g5 + theme(strip.text = element_text(face = "bold", size = rel(1.5)))
+g5
+# This will not display the plot in markdown but will print to file
+g <- ggplot_gtable(ggplot_build(g5))
+stripr <- which(grepl('strip-l', g$layout$name))
+k <- 1
+for (i in stripr) {
+  j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+  g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- clrs.bioregion[k]
+  k <- k+1
+}
+png(here::here(paste0("Figures/Composition_Biomass_timeseries_",Sys.Date(),".png")),
+    width = 10.5, height = 8, units = "in", res = 300)
+grid::grid.draw(g)
+dev.off()
+
+# Percentage
+g6 <- ggplot(bar.ts, aes(x=YearSeason, y=Biomass, fill=AssocGroup.sub)) +
+  geom_bar(position = "fill", stat="identity") +
+  theme_bw() +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        legend.position = "top",
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90))+ xlab("Year") +
+  ylab("% Average Biomass") + 
+  scale_fill_manual(name="Sp Assoc", 
+                    values=clrs.assoc.k5sub)+ 
+  scale_y_continuous(labels = scales::percent)  + 
+  scale_x_continuous(breaks = seq(1995, 2014, by = 1)) +
+  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left") +
+  coord_cartesian(xlim = c(1995.5,2014))
+
+# Needs gcookbook package
+g6 <- g6 + theme(strip.text = element_text(face = "bold", size = rel(1.5)))
+g6
+# This will not display the plot in markdown but will print to file
+g <- ggplot_gtable(ggplot_build(g6))
+stripr <- which(grepl('strip-l', g$layout$name))
+k <- 1
+for (i in stripr) {
+  j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+  g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- clrs.bioregion[k]
+  k <- k+1
+}
+png(here::here(paste0("Figures/Composition_Biomass_percent_timeseries_",
+                      Sys.Date(),".png")),
+    width = 10.5, height = 8, units = "in", res = 300)
+grid::grid.draw(g)
+dev.off()
+```
+
+# Mean total abundance and anomaly for spring (Apr - Jun)
+```{r, fig.width=10, fig.height=8}
+abund.ts <- zoop_sub %>% 
+  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
+            by = "Species") %>% 
+  left_join(dplyr::select(zoopmeta, Key, Year, Month), by = "Key") %>% 
+  left_join(dplyr::select(zoopenvi, Key, DayOfYear), by = "Key") %>% 
+  filter(Month <= 6) %>% 
+  group_by(Key, Bioregion, Year ) %>% 
+  summarise(Abundance = sum(Abundance.m2),
+            Biomass = sum(Biomass.mg.m2)) %>% 
+  group_by(Bioregion, Year) %>% 
+  summarise(Abundance.m = mean(Abundance),
+            Abundance.sd = sd(Abundance),
+            Biomass.m = mean(Biomass),
+            Biomass.sd = sd(Biomass),
+            nsamples = n()) %>% 
+  ungroup() 
+
+g7 <- ggplot(abund.ts, aes(x = Year, y = Abundance.m, color = Bioregion)) +
+  # geom_errorbar(aes(ymin = Abundance.m - Abundance.sd,
+  #                   ymax = Abundance.m + Abundance.sd)) +
+  geom_point(shape = 0) + 
+  geom_line()+
+  scale_color_manual(values = clrs.bioregion) +
+  ylab("Average Abundance") +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        legend.position = "top")
+g7
+
+
+abund.ts.anom <- abund.ts %>% 
+  group_by(Bioregion) %>% 
+  mutate(mabu = mean(Abundance.m),
+         mbio = mean(Biomass.m)) %>% 
+  mutate(Abundance.anom = Abundance.m - mean(Abundance.m),
+         Biomass.anom = Biomass.m - mean(Biomass.m))
+
+# Abundance
+g8 <- ggplot(abund.ts.anom, aes(x=Year, y=Abundance.anom)) +
+  geom_bar(stat = "identity") +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        legend.position = "bottom",
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90))+ xlab("Year") +
+  ylab("Average Abundance Anomaly") +
+  scale_x_continuous(breaks = seq(1995, 2014, by = 1))  +
+  coord_cartesian(xlim = c(1995.5,2014)) +
+  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left")
+
+g8
+
+png(here::here(paste0("Figures/Abundance_anomaly_timeseries_spring_",
+                      Sys.Date(),".png")),
+    width = 10.5, height = 8, units = "in", res = 300)
+plot_grid(g7,g8,ncol=1, labels = "auto", rel_heights = c(1,2))
+dev.off()
+```
+
+
+# Mean total abundance and anomaly for summer (Jul-Oct)
+```{r, fig.width=10, fig.height=8}
+abund.ts <- zoop_sub %>% 
+  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
+            by = "Species") %>% 
+  left_join(dplyr::select(zoopmeta, Key, Year, Month), by = "Key") %>% 
+  left_join(dplyr::select(zoopenvi, Key, DayOfYear), by = "Key") %>% 
+  filter(Month %in% c(7,8,9,10)) %>% 
+  group_by(Key, Bioregion, Year ) %>% 
+  summarise(Abundance = sum(Abundance.m2),
+            Biomass = sum(Biomass.mg.m2)) %>% 
+  group_by(Bioregion, Year) %>% 
+  summarise(Abundance.m = mean(Abundance),
+            Abundance.sd = sd(Abundance),
+            Biomass.m = mean(Biomass),
+            Biomass.sd = sd(Biomass),
+            nsamples = n()) %>% 
+  ungroup() 
+
+g9 <- ggplot(abund.ts, aes(x = Year, y = Abundance.m, color = Bioregion)) +
+  # geom_errorbar(aes(ymin = Abundance.m - Abundance.sd,
+  #                   ymax = Abundance.m + Abundance.sd)) +
+  geom_point(shape = 0) + 
+  geom_line()+
+  scale_color_manual(values = clrs.bioregion) +
+  ylab("Average Abundance") +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        legend.position = "top")
+g9
+
+
+abund.ts.anom <- abund.ts %>% 
+  group_by(Bioregion) %>% 
+  mutate(mabu = mean(Abundance.m),
+         mbio = mean(Biomass.m)) %>% 
+  mutate(Abundance.anom = Abundance.m - mean(Abundance.m),
+         Biomass.anom = Biomass.m - mean(Biomass.m))
+
+# Abundance
+g10 <- ggplot(abund.ts.anom, aes(x=Year, y=Abundance.anom)) +
+  geom_bar(stat = "identity") +
+  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        legend.position = "bottom",
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 90))+ xlab("Year") +
+  ylab("Average Abundance Anomaly") +
+  scale_x_continuous(breaks = seq(1995, 2014, by = 1))  +
+  coord_cartesian(xlim = c(1995.5,2014)) +
+  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left")
+
+g10
+
+png(here::here(paste0("Figures/Abundance_anomaly_timeseries_summer_",
+                      Sys.Date(),".png")),
+    width = 10.5, height = 8, units = "in", res = 300)
+plot_grid(g9,g10,ncol=1, labels = "auto", rel_heights = c(1,2))
+dev.off()
+```
+
+

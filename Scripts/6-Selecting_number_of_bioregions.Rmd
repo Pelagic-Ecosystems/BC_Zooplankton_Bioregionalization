@@ -1,0 +1,129 @@
+---
+title: "Selecting_number_of_bioregions"
+author: "Patrick Pata"
+date: "21/10/2021"
+output: html_document
+---
+
+In the previous analysis, the k-means clustering of the logchord-transformed species abudnance table was determined to be optimal clustering method for this dataset. Here, the k-means solutions from k=2-20 are explored to determine what is the best number of clusters which will correspond to the bioregionalization.
+
+By the end of this file, the bioregionalization is finalized and the bioregions are named. This will be merged with all the dataframes in the zoop_data_for_regionalization* file which will be saved as the zoop_data_regionalized_* file. This will be file loaded in the subsequent analyses.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(tictoc)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_for_regionalization_10252021.RData"))
+load(here::here("Data_Output/Best_cluster_solution_10252021.RData"))
+
+source(here::here("Functions/p_biplot_pca.R"))
+```
+
+
+# Clustering indices for different K-clusters
+When deciding the number of clusters, the maximum Indval is easy to interpret because the highest value should be selected and this is ecologically interpretable already. For most of the indices, the elbow method is a heuristic way to determine K. When increasing the K does not significantly improve the clustering, the "elbow" is considered as the best K. For many of the indices, visually identifying the elbow is challenging but seems to lie between k = 3-5. To better verify this, the change in index scores is calculated and the elbow is the K before when the change in index scores plateaus.
+
+Best K
+K=3: Silhouette, Partana
+K=4: Indval, Isamic, Optimclass,Totchi, Disdiam, WithinclusterSS
+K=5: Tabdev, Calinski-Harabaz
+
+```{r, fig.width=10, figh.height=10}
+gci.kmeans <- gci.df.methods %>% 
+  filter(Method %in% "Kmeans.logchord") %>% 
+  dplyr::select(-Method)
+
+# Plot the index scores along K-solutions
+g1 <- ggplot(gci.kmeans, 
+       aes(x = Num_Clusters, y = Values) ) + 
+  geom_point() + geom_line() +
+  xlab("Number of Clusters") +
+  scale_x_continuous(breaks = seq(2,20,2)) +
+  theme_bw() +
+  facet_wrap(~ Index, ncol = 2, scales = "free")
+
+# Calculate the rate of change in index scores for the elbow method
+gci.kmeans <- gci.kmeans %>% 
+  group_by(Index) %>% 
+  mutate(ROC = (Values - lag(Values)) ) %>% 
+  ungroup() %>% 
+  filter(ROC != 0)
+
+# Plot the rate of change of index scores along K-solutions
+g2 <- ggplot(gci.kmeans, 
+       aes(x = Num_Clusters, y = ROC) ) + 
+  geom_point() + geom_line() +
+  xlab("Number of Clusters") +
+  scale_x_continuous(breaks = seq(2,20,2)) +
+  theme_bw() +
+  facet_wrap(~ Index, ncol = 2, scales = "free")
+
+g1 
+g2
+
+# png(here::here(paste0("Figures/Supp_figs/K_selection_",Sys.Date(),".png")),
+#     width = 8, height = 9, units = "in", res = 300)
+# g1
+# dev.off()
+```
+
+Summarise the number of samples that are included in each cluster level. 
+```{r}
+table(kmeans.logchord$K4)
+table(kmeans.logchord[,c(3,4)])
+table(kmeans.logchord[,c(4,5)])
+```
+
+
+# Name the bioregions
+K = 4: Nearshore, Deep fjord, Deep shelf, Offshore
+
+Because most of the clustering indices, and especially Indval, selected K=4 as the best number of clusters, this is the final bioregionalization for the study. 
+
+K=3 and K=5 also appear to be insightful clustering solutions. K=3 hints on the three general association groups of species ranges. K=5 also suggests that the offshore region has a gradient differentiating the western more HNLC offshore and the eastern transition waters which is seen in differences in nutrient limitation between these two offshore areas.
+```{r}
+bioregions <- kmeans.logchord %>% 
+  dplyr::select(Key, K4) %>% 
+  mutate(Bioregion = as.factor(K4)) %>% 
+  mutate(Bioregion = fct_recode(Bioregion,
+                                 Offshore = "4", DeepShelf = "3",
+                                 Nearshore = "1", DeepFjord = "2") ) %>% 
+  mutate(Bioregion = fct_relevel(Bioregion,
+                                  "Offshore","DeepShelf","Nearshore","DeepFjord")) %>% 
+  dplyr::select(-K4)
+
+clrs.bioregion <- c("#004DFB","#FB20CA","#FFA500","#20FF00")
+# p_biplot_pca(rdaoutput = pca.zoop, 
+#              cluster = bioregions$Bioregion,
+#              alpha = 0.6, legendtitle = "Bioregion",
+#              clrs = clrs.bioregion)
+```
+
+# Merge bioregions to other dataframes and save new file for loading
+```{r}
+zoopmeta <- left_join(bioregions, zoopmeta)
+zoopenvi <- left_join(bioregions, zoopenvi)
+zoopdiversity <- left_join(bioregions, zoopdiversity)
+zoop_sub <- left_join(bioregions, zoop_sub)
+
+
+save(file = here::here("Data_Output/zoop_data_regionalized_10252021.RData"),
+     clrs.bioregion, bioregions, zoopmeta, zoopdiversity, zoopenvi, zoop_sub,
+     zoop_abundance, zoop.log, zoop.logchord, zoop.pa, zoop_sub_excluded,
+     taxalist, sp.abund.list)
+```
+
+Prepare list of sample keys and bioregion assignment for plotting water property depth profiles in Matlab.
+```{r, eval = FALSE}
+
+```
+

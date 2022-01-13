@@ -1,0 +1,647 @@
+---
+title: "Robustness_analysis_taxonomy"
+author: "Patrick Pata"
+date: "01/11/2021"
+output: html_document
+---
+
+Robustness analysis to test similarity of results at genus and family level classification.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load library and files with the original bioregionalization
+```{r}
+library(tidyverse)
+library(vegan)
+library(here)
+library(matrixStats)
+`%notin%` <- Negate(`%in%`)
+source(here::here("Functions/p_biplot_pca.R"))
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+
+theme_set(theme_bw())
+```
+
+# If not excluding species <3% presence
+```{r}
+set.seed(888)
+
+# Create new cross tab
+zs.sp.all <- zoop_sub %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.all[,1:2]
+zs.sp <- zs.sp.all[,3:ncol(zs.sp.all)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization all 455 species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+# If using the same zoop_abundance table
+Genus level
+```{r}
+set.seed(888)
+
+A <- dplyr::select(taxalist, Taxa.Name, Taxa.Name.Genus) %>% 
+  unique()
+
+zs.genus <- zoop_sub %>% 
+  left_join( A, by = c("Species" = "Taxa.Name" ) )
+
+# Create new cross tab
+zs.genus.abundance <- zs.genus %>% 
+  group_by(Key, Bioregion, Genus = Taxa.Name.Genus) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2),
+            Biomass.mg.m2 = sum(Biomass.mg.m2)) %>% 
+  ungroup() %>% 
+  dplyr::select(Key, Bioregion, Genus, Abundance.m2) %>% 
+  pivot_wider(names_from = Genus, values_from = Abundance.m2, values_fill = 0) 
+
+# Original bioregionalization
+keys.og <- zs.genus.abundance[,1:2]
+zs.ga.ab <- zs.genus.abundance[,3:ncol(zs.genus.abundance)]
+
+# Filter out <3% of all samples
+zs.ga.pa <- decostand(zs.ga.ab, method = "pa")
+ii <- which(colSums(zs.ga.pa / nrow(zs.ga.pa)) >= 0.03)
+zs.ga.ab <- zs.ga.ab[,ii]
+
+# transform
+zs.ga.log <- log1p(zs.ga.ab)
+zs.ga.logchord <- decostand( zs.ga.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.ga.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization at genus level: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+Family level
+```{r}
+set.seed(888)
+
+A <- dplyr::select(taxalist, Taxa.Name, Taxa.Name.Family) %>% 
+  unique()
+
+zs.family <- zoop_sub %>% 
+  left_join( A, by = c("Species" = "Taxa.Name" ) )
+
+# Create new cross tab
+zs.family.abundance <- zs.family %>% 
+  group_by(Key, Bioregion, Family = Taxa.Name.Family) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2),
+            Biomass.mg.m2 = sum(Biomass.mg.m2)) %>% 
+  ungroup() %>% 
+  dplyr::select(Key, Bioregion, Family, Abundance.m2) %>% 
+  pivot_wider(names_from = Family, values_from = Abundance.m2, values_fill = 0) 
+
+# Original bioregionalization
+keys.og <- zs.family.abundance[,1:2]
+zs.fa.ab <- zs.family.abundance[,3:ncol(zs.family.abundance)]
+
+# Filter out <3% of all samples
+zs.fa.pa <- decostand(zs.fa.ab, method = "pa")
+ii <- which(colSums(zs.fa.pa / nrow(zs.fa.pa)) >= 0.03)
+zs.fa.ab <- zs.fa.ab[,ii]
+
+# transform
+zs.fa.log <- log1p(zs.fa.ab)
+zs.fa.logchord <- decostand( zs.fa.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.fa.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization at family level: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+
+```
+
+
+# If including the observations that were excluded due to taxonomic specificity (flag = 2/3) 
+Genus level
+```{r}
+set.seed(888)
+
+A <- dplyr::select(taxalist, Taxa.Name, Taxa.Name.Genus) %>% 
+  unique()
+
+zs.genus <- zoop_sub %>% 
+  left_join( A, by = c("Species" = "Taxa.Name" ) )
+
+zs.genus.x <- zoop_sub_excluded %>% 
+  left_join( A, by = c("Species" = "Taxa.Name" ) ) %>% 
+  left_join( dplyr::select(zoopmeta, Key, Bioregion), by = "Key") %>% 
+  filter(Taxa.Name.Genus %in% unique(zs.genus$Taxa.Name.Genus))
+
+
+# Create new cross tab
+zs.genus.abundance <- zs.genus %>% 
+  bind_rows(zs.genus.x) %>% 
+  group_by(Key, Bioregion, Genus = Taxa.Name.Genus) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2),
+            Biomass.mg.m2 = sum(Biomass.mg.m2)) %>% 
+  ungroup() %>% 
+  select(Key, Bioregion, Genus, Abundance.m2) %>% 
+  pivot_wider(names_from = Genus, values_from = Abundance.m2, values_fill = 0) 
+
+# Original bioregionalization
+keys.og <- zs.genus.abundance[,1:2]
+zs.ga.ab <- zs.genus.abundance[,3:ncol(zs.genus.abundance)]
+
+# Filter out <3% of all samples
+zs.ga.pa <- decostand(zs.ga.ab, method = "pa")
+ii <- which(colSums(zs.ga.pa / nrow(zs.ga.pa)) >= 0.03)
+zs.ga.ab <- zs.ga.ab[,ii]
+
+# transform
+zs.ga.log <- log1p(zs.ga.ab)
+zs.ga.logchord <- decostand( zs.ga.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.ga.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization at genus level: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+Family level
+```{r}
+set.seed(888)
+
+A <- dplyr::select(taxalist, Taxa.Name, Taxa.Name.Family) %>% 
+  unique()
+
+zs.family <- zoop_sub %>% 
+  left_join( A, by = c("Species" = "Taxa.Name" ) )
+
+zs.family.x <- zoop_sub_excluded %>% 
+  left_join( A, by = c("Species" = "Taxa.Name" ) ) %>% 
+  left_join( dplyr::select(zoopmeta, Key, Bioregion), by = "Key") %>% 
+  filter(Taxa.Name.Family %in% unique(zs.family$Taxa.Name.Family))
+
+
+# Create new cross tab
+zs.family.abundance <- zs.family %>% 
+  bind_rows(zs.family.x) %>% 
+  group_by(Key, Bioregion, Family = Taxa.Name.Family) %>% 
+  summarise(Abundance.m2 = sum(Abundance.m2),
+            Biomass.mg.m2 = sum(Biomass.mg.m2)) %>% 
+  ungroup() %>% 
+  dplyr::select(Key, Bioregion, Family, Abundance.m2) %>% 
+  pivot_wider(names_from = Family, values_from = Abundance.m2, values_fill = 0) 
+
+# Original bioregionalization
+keys.og <- zs.family.abundance[,1:2]
+zs.fa.ab <- zs.family.abundance[,3:ncol(zs.family.abundance)]
+
+# Filter out <3% of all samples
+zs.fa.pa <- decostand(zs.fa.ab, method = "pa")
+ii <- which(colSums(zs.fa.pa / nrow(zs.fa.pa)) >= 0.03)
+zs.fa.ab <- zs.fa.ab[,ii]
+
+# transform
+zs.fa.log <- log1p(zs.fa.ab)
+zs.fa.logchord <- decostand( zs.fa.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.fa.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization at family level: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+
+```
+
+Copepods only
+```{r}
+set.seed(888)
+
+# Create subset species list
+# splist <- left_join(sp.abund.list, taxalist, by = c("Species" = "Taxa.Name"))
+splist <- taxalist %>% 
+  filter(Major.Group %in% c("Calanoids","Non-calanoids") & Taxa.Flag == 1) %>% 
+  dplyr::select(Species = "Taxa.Name", Major.Group) %>% 
+  distinct() %>% 
+  left_join(sp.abund.list) %>% 
+  filter(presence.perc >= 3)
+
+# Create new cross tab
+zs.sp.cop <- zoop_sub %>% 
+  filter(Species %in% splist$Species) %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.cop[,1:2]
+zs.sp <- zs.sp.cop[,3:ncol(zs.sp.cop)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization for ",nrow(splist)," copepod species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+Holoplankton
+```{r}
+# Create subset species list
+# splist <- left_join(sp.abund.list, taxalist, by = c("Species" = "Taxa.Name"))
+splist <- taxalist %>% 
+  filter(Major.Group %in% c("Calanoids","Non-calanoids","Appendicularians",
+                            "Branchiopods","Gastropods","Hydromedusae",
+                            "Siphonophores","Amphipods","Mysids","Euphausiids",
+                            "Chaetognaths","Ctenophora","Ostracods","Salps",
+                            "Doliolids","Annelids") & Taxa.Flag == 1) %>% 
+  filter(Order %notin% c("Canalipalpata","Neotaenioglossa")) %>% 
+  filter(Taxa.Flag == 1) %>% 
+  dplyr::select(Species = "Taxa.Name", Major.Group) %>% #, Family, Order, Class) %>% 
+  distinct() %>% 
+  left_join(sp.abund.list) %>% 
+  filter(presence.perc >= 3)
+
+# Create new cross tab
+zs.sp.cop <- zoop_sub %>% 
+  filter(Species %in% splist$Species) %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.cop[,1:2]
+zs.sp <- zs.sp.cop[,3:ncol(zs.sp.cop)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization for ",nrow(splist)," holoplankton species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+Meroplankton
+```{r}
+# Create subset species list
+# splist <- left_join(sp.abund.list, taxalist, by = c("Species" = "Taxa.Name"))
+splist <- taxalist %>% 
+  filter(Major.Group %notin% c("Calanoids","Non-calanoids","Appendicularians",
+                            "Branchiopods","Hydromedusae", "Amphipods",
+                            "Siphonophores","Mysids","Euphausiids",
+                            "Chaetognaths","Ctenophora","Ostracods","Salps",
+                            "Doliolids") & Taxa.Flag == 1) %>%
+  filter(Order %notin% c("Aciculata","Gymnosomata","Thecosomata","Cephalaspidea")) %>%
+  dplyr::select(Species = "Taxa.Name", Major.Group) %>%  #, Family, Order, Class) %>% 
+  distinct() %>% 
+  left_join(sp.abund.list) %>%
+  filter(presence.perc >= 3)
+
+# Create new cross tab
+zs.sp.cop <- zoop_sub %>% 
+  filter(Species %in% splist$Species) %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.cop[,1:2]
+zs.sp <- zs.sp.cop[,3:ncol(zs.sp.cop)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization for ",nrow(splist)," meroplankton species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+Crustacean Holoplankton
+```{r}
+# Create subset species list
+# splist <- left_join(sp.abund.list, taxalist, by = c("Species" = "Taxa.Name"))
+splist <- taxalist %>% 
+  filter(Major.Group %in% c("Calanoids","Non-calanoids",
+                            "Branchiopods","Amphipods","Mysids","Euphausiids",
+                            "Ostracods") & Taxa.Flag == 1) %>% 
+  filter(Order %notin% c("Canalipalpata")) %>% 
+  filter(Taxa.Flag == 1) %>% 
+  dplyr::select(Species = "Taxa.Name", Major.Group) %>% #, Family, Order, Class) %>% 
+  distinct() %>% 
+  left_join(sp.abund.list) %>% 
+  filter(presence.perc >= 0)
+
+# Create new cross tab
+zs.sp.cop <- zoop_sub %>% 
+  filter(Species %in% splist$Species) %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.cop[,1:2]
+zs.sp <- zs.sp.cop[,3:ncol(zs.sp.cop)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization for ",nrow(splist)," crustacean holoplankton species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+non-crustacean Holoplankton
+```{r}
+# Create subset species list
+# splist <- left_join(sp.abund.list, taxalist, by = c("Species" = "Taxa.Name"))
+splist <- taxalist %>% 
+  filter(Major.Group %in% c("Gastropods","Hydromedusae",
+                            "Siphonophores", "Appendicularians",
+                            "Chaetognaths","Ctenophora","Salps",
+                            "Doliolids","Annelids") & Taxa.Flag == 1) %>% 
+  filter(Order %notin% c("Canalipalpata","Neotaenioglossa")) %>% 
+  filter(Taxa.Flag == 1) %>% 
+  dplyr::select(Species = "Taxa.Name", Major.Group) %>% #, Family, Order, Class) %>% 
+  distinct() %>% 
+  left_join(sp.abund.list) %>% 
+  filter(presence.perc >= 0)
+
+# Create new cross tab
+zs.sp.cop <- zoop_sub %>% 
+  filter(Species %in% splist$Species) %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.cop[,1:2]
+zs.sp <- zs.sp.cop[,3:ncol(zs.sp.cop)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization for ",nrow(splist)," non-crustacean holoplankton species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+Holoplankton w/o copepods
+```{r}
+# Create subset species list
+# splist <- left_join(sp.abund.list, taxalist, by = c("Species" = "Taxa.Name"))
+splist <- taxalist %>% 
+  filter(Major.Group %in% c("Appendicularians",
+                            "Branchiopods","Gastropods","Hydromedusae",
+                            "Siphonophores","Amphipods","Mysids","Euphausiids",
+                            "Chaetognaths","Ctenophora","Ostracods","Salps",
+                            "Doliolids","Annelids") & Taxa.Flag == 1) %>% 
+  filter(Order %notin% c("Canalipalpata","Neotaenioglossa")) %>% 
+  filter(Taxa.Flag == 1) %>% 
+  dplyr::select(Species = "Taxa.Name", Major.Group) %>% #, Family, Order, Class) %>% 
+  distinct() %>% 
+  left_join(sp.abund.list) %>% 
+  filter(presence.perc >= 3)
+
+# Create new cross tab
+zs.sp.cop <- zoop_sub %>% 
+  filter(Species %in% splist$Species) %>% 
+  dplyr::select(Key, Bioregion, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.cop[,1:2]
+zs.sp <- zs.sp.cop[,3:ncol(zs.sp.cop)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization for ",nrow(splist)," holoplankton species: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+
+
+# Bioregionalization of the presence-absence and biomass data
+```{r}
+set.seed(888)
+
+# ** P/A **
+# Original bioregionalization
+keys.og <- bioregions
+
+# Chord transformation of presence-absence
+zs.sp.chord <- decostand( zoop.pa, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zoop.pa, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# # Sorensen dissimilarity
+# zs.sp.soren <- vegdist(zoop.pa, method = "bray", binary = TRUE)
+# km <- kmeans(zs.sp.soren, 4, nstart = 10, iter.max = 1000)
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization of presence-absence: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+
+
+
+# ** Biomass **
+splist <- sp.abund.list %>% 
+  filter(presence.perc >= 3)
+
+# Create new cross tab
+zs.sp.biom <- zoop_sub %>% 
+  dplyr::select(Key, Bioregion, Species, Biomass.mg.m2) %>% 
+  filter(Species %in% splist$Species) %>% 
+  pivot_wider(names_from = Species, values_from = Biomass.mg.m2, values_fill = 0) 
+
+
+# Original bioregionalization
+keys.og <- zs.sp.biom[,1:2]
+zs.sp <- zs.sp.biom[,3:ncol(zs.sp.biom)]
+
+
+# transform
+zs.sp.log <- log1p(zs.sp)
+zs.sp.logchord <- decostand( zs.sp.log, method = "normalize")
+
+# cluster with K-means, 4 bioregions
+km <- kmeans(zs.sp.logchord, 4, nstart = 10, iter.max = 1000)
+keys.og$newregions <- km$cluster
+
+# Get the % of samples with different bioregionalization
+# Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+A <- table(keys.og[,2:3])
+B <- rowSums(A) - rowMaxs(A)
+C <- sum(B) / sum(A) * 100
+
+print(paste0("Bioregionalization of biomass: ",
+             format(round(C, 2), nsmall = 2),
+             "% classification error."))
+
+B/sum(A)*100
+```
+

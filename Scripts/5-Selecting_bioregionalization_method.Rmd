@@ -1,0 +1,415 @@
+---
+title: "Selecting_bioregionalization_method"
+author: "Patrick Pata"
+date: "20/10/2021"
+output: html_document
+---
+
+Various bioregionalization methods will be explored and evaluated by different indices. This will load the curated and wrangled dataset prepared in 4-Zooplankton_data_wrangling.Rmd. At the end of this file, the best cluster analysis solution is saved including a dataframe of the cluster rankings with the other methods. This file should be loade din the next sections as the basis of the regionalization.
+
+Along the way, intermediary data frames are also saved in the Data_Output folder/temp. This include the dissimilarity matrices which are 0.25 GB and the results of the 9 cluster analysis methods which would take a while to compute (at least 2 hours).
+
+The main references for statistics notes here are from Legendre and Legendre 2012. Numerical Ecology and Borcard and Legendre 2018 Numerical Ecology with R.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(cluster)
+library(tictoc)
+library(fpc)
+library(optpart)
+library(dunn.test)
+library(cowplot)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_for_regionalization_10252021.RData"))
+source(here::here("Functions/p_goodness_of_clustering.R"))
+
+
+theme_set(theme_bw())
+```
+
+# 1. Calculate dissimilarity matrices and apply pcoa
+Note that BCD and Sorensen distances are semi-metric need to be square-rooted before PCOA. Note that PCOA of the logchord dissimilarity is the same as PCA of the logchord transformed species matrix.
+
+is.euclid() function is available in the ade4 package to confirm if matrices are metric.
+
+vegan::cmdscale() and ape:pcoa() are the same methods and would produce the same results but I prefer using pcoa() because it alread calculates the relative eigenvalues.
+```{r}
+zmat.soren <- vegdist(zoop.pa, method = "bray", binary = TRUE)
+zmat.bcd <- vegdist(zoop.log, method = "bray")
+zmat.lchord <- dist(zoop.logchord)
+
+zmat.pcoa.soren <- pcoa(sqrt(zmat.soren)) 
+zmat.pcoa.bcd <- pcoa(sqrt(zmat.bcd)) 
+zmat.pcoa.lchord <- pcoa(zmat.lchord)
+
+# # Inspect if ordinations are similar
+# z.pca.lchord <- rda(zoop.logchord)
+# head(zmat.pcoa.lchord$values$Relative_eig)
+# head( z.pca.lchord$CA$eig / sum(z.pca.lchord$CA$tot.chi) )
+# 
+# head(zmat.pcoa.soren$values$Relative_eig)
+# head(zmat.pcoa.bcd$values$Relative_eig)
+# head(zmat.pcoa.lchord$values$Relative_eig)
+
+```
+
+Mantel test between dissimilarity matrices. 999 permutations, pearson correlation.
+Soren-BCD: r = 0.9469, p = 0.001
+Soren-lchord: r = 0.9051, p = 0.001
+Lchord-BCD: r = 0.9723, p = 0.001
+```{r, eval=FALSE}
+vegan::mantel(zmat.soren, zmat.bcd)
+vegan::mantel(zmat.soren, zmat.lchord)
+vegan::mantel(zmat.lchord, zmat.bcd)
+
+```
+
+
+# 2. Hierarchical analysis
+The ward distance is used because it attempts to minimize the within-cluster sum of squares error thus would result in more structuring, thus more ideal for the purpose of bioregionalization, relative to the continuum of single linkage to complete linkage.
+```{r}
+nclust <- 20 # The maximum number of clusters to check
+
+hclust.soren <- hclust( zmat.soren, method = "ward.D2" )
+hclust.bcd <- hclust( zmat.bcd, method = "ward.D2" )
+hclust.lchord <- hclust( zmat.lchord, method = "ward.D2" )
+
+k.hclust.soren <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+k.hclust.bcd <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+k.hclust.lchord <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+for (k in seq(2,nclust)) {
+  k.hclust.soren[,k-1] <- cutree(hclust.soren, k = k)
+  k.hclust.bcd[,k-1] <- cutree(hclust.bcd, k = k)
+  k.hclust.lchord[,k-1] <- cutree(hclust.lchord, k = k)
+}
+
+```
+
+Contingency tables can be used to compare cluster solutions
+```{r, eval=FALSE}
+k <- 4-1
+df <- table(soren = as.factor(k.hclust.soren[,k]), 
+            bcd = as.factor(k.hclust.bcd[,k]))
+
+ggplot(data = as.data.frame(df), mapping = aes(x = soren, y = bcd)) +
+  geom_tile(aes(fill = Freq), colour = "white") +
+  geom_text(aes(label = sprintf("%1.0f", Freq)), vjust = 1, size = 5) +
+  scale_fill_gradient(low="white", high = "red")+
+  theme_bw() + theme(legend.position = "none",
+                     axis.title = element_text(size = 20),
+                     axis.text = element_text(size = 20))
+  
+df <- table(bcd = as.factor(k.hclust.bcd[,k]),
+            lchord = as.factor(k.hclust.lchord[,k]))
+
+ggplot(data = as.data.frame(df), mapping = aes(x = lchord, y = bcd)) +
+  geom_tile(aes(fill = Freq), colour = "white") +
+  geom_text(aes(label = sprintf("%1.0f", Freq)), vjust = 1, size = 5) +
+  scale_fill_gradient(low="white", high = "red")+
+  theme_bw() + theme(legend.position = "none",
+                     axis.title = element_text(size = 20),
+                     axis.text = element_text(size = 20))
+
+rm(df)
+```
+
+# 3. K-Means
+K-means implicitly applies Euclidean distances so this can be calculated on the logchord transformed species matrix but the BCD and Sorensen matrices need to be square-root transformed and subjected to PCOA to be used in a linear Kmeans. The pcoa() product for kmeans is pcoa()$vectors.
+
+K-means would result to slightly different solutions because of the stochastic component of the starting points. So calculate for nstart = 10 and 1,000 times in iter.max to minimize this error.
+```{r}
+set.seed(888)
+
+kmeans.soren <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+kmeans.bcd <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+kmeans.lchord <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+
+# store totalSS
+totalSS <- matrix(NA, nrow = (nclust-1), ncol = 3)
+
+for (k in seq(2,nclust)) {
+  km <- kmeans(zmat.pcoa.soren$vectors, k, nstart =10, iter.max = 1000)
+  kmeans.soren[,k-1] <- km$cluster
+  totalSS[k-1,1] <- km$tot.withinss
+  km <-  kmeans(zmat.pcoa.bcd$vectors, k, nstart = 10, iter.max = 1000)
+  kmeans.bcd[,k-1] <- km$cluster
+  totalSS[k-1,2] <- km$tot.withinss
+  km <- kmeans(zoop.logchord, k, nstart = 10, iter.max = 1000)
+  kmeans.lchord[,k-1] <- km$cluster
+  totalSS[k-1,3] <- km$tot.withinss
+}
+
+# Visualize potential elbow point
+plot(2:20,totalSS[,3],type="b", main="Total Within SS by Various K",
+ ylab="Average Total Within Sum of Squares",
+ xlab="Value of K")
+```
+
+# 4. PAM
+Supposedly "a more robust version of K-means" according to the documentation. Robust because it minimizes the sum of dissimilarities (like in a silhouette plot) instead of the the sum of squares in k-means. It can accept a dissimilarity matrix. Nstart = 10 results to stable clusters relative to Nstart = 100.
+```{r}
+set.seed(888)
+
+k.pam.soren <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+k.pam.bcd <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+k.pam.lchord <- matrix(NA, nrow = nrow(zoopmeta), ncol = (nclust-1))
+for (k in seq(2,nclust)) {
+  k.pam.soren[,k-1] <- pam(zmat.soren, k, nstart = 10, pamonce = 6, cluster.only = TRUE)
+  k.pam.bcd[,k-1] <- pam(zmat.bcd, k, nstart = 10, pamonce = 6, cluster.only = TRUE)
+  k.pam.lchord[,k-1] <- pam(zoop.logchord, k, nstart = 10, pamonce = 6, cluster.only = TRUE)
+}
+```
+
+5. Clustering evaluation
+This uses the goc_index() function in the functions/p_goodness_of_clustering.R file. The first 10 indices will be used for comparing the cluster analysis methods. Indices 1-5 requires the species table for evaluation while indices 6-10 requires the dissimilarity matrix. For consistency, the log-transformed abundance species table and the log-chord dissimilarity matrix are used.
+
+This chunk loops through all clustering solutions and then organizes the indices into a single long dataframe. Running this takes a while (~1 hour).
+```{r}
+tic("sample eval")
+# hierachical clustering
+print("Analyzing hclust results")
+gci <- goc_index(multiclust = k.hclust.soren,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "Hclust.Sorensen")
+gci.df <- gci #the first index
+
+gci <- goc_index(multiclust = k.hclust.bcd,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "Hclust.BCD")
+gci.df <- left_join(gci.df, gci)
+
+gci <- goc_index(multiclust = k.hclust.lchord,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "Hclust.logchord")
+gci.df <- left_join(gci.df, gci)
+
+
+# k-means
+print("Analyzing k-means results")
+gci <- goc_index(multiclust = kmeans.soren,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "Kmeans.Sorensen")
+gci.df <- left_join(gci.df, gci)
+
+gci <- goc_index(multiclust = kmeans.bcd,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "Kmeans.BCD")
+gci.df <- left_join(gci.df, gci)
+
+gci <- goc_index(multiclust = kmeans.lchord,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "Kmeans.logchord")
+gci.df <- left_join(gci.df, gci)
+
+
+# pam
+print("Analyzing PAM results")
+gci <- goc_index(multiclust = k.pam.soren,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "PAM.Sorensen")
+gci.df <- left_join(gci.df, gci)
+
+gci <- goc_index(multiclust = k.pam.bcd,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "PAM.BCD")
+gci.df <- left_join(gci.df, gci)
+
+gci <- goc_index(multiclust = k.pam.lchord,
+                 spemat = zoop.log, distmat = zmat.lchord)
+gci <- pivot_longer(gci[,1:11], -Num_Clusters, names_to = "Index", 
+                     values_to = "PAM.logchord")
+gci.df <- left_join(gci.df, gci)
+
+toc()
+
+# lengthen the clustering method
+gci.df.methods <- pivot_longer(gci.df, -c(Num_Clusters, Index),
+                               names_to = "Method", values_to = "Values")
+# reorder the levels of the methods and indices
+gci.df.methods <- gci.df.methods %>% 
+  mutate(Method = as_factor(Method),
+         Index = as_factor(Index))
+
+# gci.df.methods$Method <- fct_recode(gci.df.methods$Method, 
+#                 Hclust.Sorensen = "k.hclust.soren", Hclust.BCD = "k.hclust.bcd",
+#                 Hclust.logchord = "k.hclust.lchord", Kmeans.Sorensen = "kmeans.soren",
+#                 Kmeans.BCD = "kmeans.bcd", Kmeans.logchord = "kmeans.logchord",
+#                 PAM.Sorensen = "k.pam.soren", PAM.BCD = "k.pam.bcd",
+#                 PAM.logchord = "k.pam.lchord")
+
+# rm(gci, gci.df)
+```
+
+# 6. Save the cluster analysis and evaluation results
+```{r}
+save(file = here::here("Data_Output/temp/clustering_solutions_evaluation_1025021.RData"), 
+     "gci.df.methods", 
+     "k.hclust.soren","k.hclust.bcd","k.hclust.lchord",
+     "kmeans.soren","kmeans.bcd","kmeans.lchord",
+     "k.pam.soren","k.pam.bcd","k.pam.lchord")
+save(file = here::here("Data_Output/temp/distance_matrices_for_clustering_1025021.RData"),
+     "zmat.soren","zmat.bcd","zmat.lchord",
+     "zmat.pcoa.soren", "zmat.pcoa.bcd", "zmat.pcoa.lchord")
+```
+
+Free up some memory consumed by the dissimilarity matrices
+```{r}
+rm(list = c( "zmat.soren","zmat.bcd","zmat.lchord",
+     "zmat.pcoa.soren", "zmat.pcoa.bcd", "zmat.pcoa.lchord"))
+```
+
+
+# 7. Explore cluster evaluation results
+Compare methods for each index
+```{r, fig.width=15, fig.height=15}
+# load(here::here("Data_Output/temp/clustering_solutions_evaluation_1025021.RData"))
+ggplot(gci.df.methods, aes(x = Num_Clusters, y = Values, color = Method)) + 
+  geom_point() + geom_line() +
+  xlab("Number of Clusters") +
+  facet_wrap(~ Index, ncol = 2, scales = "free")
+```
+
+
+# 6. Rank and identify best method
+```{r, fig.width=15, fig.height=15}
+# Rank the clustering methods for each index and K clusters
+gci.df.methods <- gci.df.methods %>% 
+  group_by(Index, Num_Clusters) %>%
+  mutate(Rank = rank(-Values)) %>% 
+  ungroup()
+
+# Reverse the rankings for Tabdev, totchi, disdiam, and WithinClusterSS because lower values are better. Subtract from 10, because there are 9 clustering solutions.
+gci.df.methods$Rank[gci.df.methods$Index %in%
+                      c("TABDEV","TOTCHI","DISDIAM","WithinClusterSS")] <- 
+  10 - gci.df.methods$Rank[gci.df.methods$Index %in%
+                              c("TABDEV","TOTCHI","DISDIAM","WithinClusterSS")]
+```
+
+
+Boxplots comparing the distribution of rankings
+```{r, fig.width=15, fig.height=15}
+ggplot(data = gci.df.methods, aes(x = Method, y = Rank, fill = Method)) +
+  geom_boxplot() +
+  facet_wrap(~ Index, ncol = 2, scales = "free") +
+  scale_y_reverse() + 
+  ggtitle("Comparison between clustering algorithms")
+```
+
+Calculate the median rankings for each method and index, across the K=2-20 solutions
+The general results are similar when the range of k-cluster solutions is modified (i.e., k-means-logchord is the best solution if summarized from k=2-5 or k=2-20).
+```{r, fig.width=12, fig.height=8}
+DF1 <- gci.df.methods
+DF1$subplot <- "A"
+DF2 <- filter(gci.df.methods, Num_Clusters == 4)
+DF2$subplot <- "B"
+DF <- bind_rows(DF1, DF2) %>% 
+  mutate(Method = fct_recode(Method,"Hclust\nSorensen"="Hclust.Sorensen",
+                             "Hclust\nBray-Curtis" = "Hclust.BCD",
+                             "Hclust\nlog-chord" = "Hclust.logchord",
+                             "Kmeans\nSorensen"="Kmeans.Sorensen",
+                             "Kmeans\nBray-Curtis" = "Kmeans.BCD",
+                             "Kmeans\nlog-chord" = "Kmeans.logchord",
+                             "PAM\nSorensen"="PAM.Sorensen",
+                             "PAM\nBray-Curtis" = "PAM.BCD",
+                             "PAM\nlog-chord" = "PAM.logchord"))
+  
+ggplot(data = DF, aes(x = Method, y = Rank, fill = Method)) +
+  geom_boxplot() + 
+  scale_y_reverse(n.breaks = 9) + 
+  theme_bw() +
+  ggtitle("Average ranking across 10 clustering indices for k = 2-20 solutions") +
+  theme(text = element_text(size = 14),  
+        axis.text = element_text(size = 14),
+        legend.position = "none") +
+  facet_wrap(~subplot, ncol = 1)
+```
+
+
+```{r, fig.width=10, fig.height=8}
+g1 <- ggplot(data = filter(DF, subplot == "A"), aes(x = Method, y = Rank, fill = Method)) +
+  geom_boxplot() + 
+    stat_summary(fun.y=mean, geom="point", 
+                 shape=17, size=3, color="black") +
+  scale_y_reverse(n.breaks = 9) + 
+  theme_bw() +
+  ggtitle("Ranking for K = 2-20 solutions") +
+  theme(text = element_text(size = 14),  
+        axis.text = element_text(size = 14),
+        legend.position = "none")
+
+
+g2 <- ggplot(data = filter(DF, subplot == "B"), 
+                     aes(x = Method, y = Rank, fill = Method)) +
+  geom_boxplot() + 
+    stat_summary(fun.y=mean, geom="point", 
+                 shape=17, size=3, color="black") +
+  scale_y_reverse(n.breaks = 9) + 
+  theme_bw() +
+  ggtitle("Ranking for K = 4 solutions") +
+  theme(text = element_text(size = 14), 
+        axis.text = element_text(size = 14),
+        legend.position = "none")
+
+plot_grid(g1,g2, align="v",ncol=1,labels = c("A","B"))
+
+# png(here::here("Figures/Supp_figs/SuppFig_bioregionalization_methods_withmean.png"),
+#     width = 10, height = 8, units = "in", res = 300)
+# plot_grid(g1,g2, align="v",ncol=1,labels = c("A","B"))
+# dev.off()
+
+```
+
+
+# 7. Significance test
+A Kruskal-Wallis H test was used to test if there are significant differences between cluster analysis approaches and a post-hoc Dunn’s test was used to test if the best approach is significantly different from each of the other approaches. Alternative post-hoc test is pairwise Wilcoxon rank sum test. 
+
+Differences in clustering strength (as ranks) are compared here, not the cluster solutions themselves.
+```{r}
+kruskal.test(Rank ~ Method, data= gci.df.methods)
+
+dunn.test(gci.df.methods$Rank, gci.df.methods$Method,
+          method = "bh")
+
+pairwise.wilcox.test(gci.df.methods$Rank, gci.df.methods$Method,
+                     p.adjust.method = "BH")
+
+# # for K = 4 only
+# df4 <- filter(gci.df.methods, Num_Clusters == 4)
+# kruskal.test(Rank ~ Method, data= df4)
+# 
+# dunn.test(df4$Rank, df4$Method,
+#           method = "bh")
+# 
+# pairwise.wilcox.test(df4$Rank, df4$Method,
+#                      p.adjust.method = "BH")
+
+```
+
+# 8. Save best clustering solution and the dataframe with rankings
+```{r}
+# Add net keys
+kmeans.logchord <- cbind(zoopmeta[,1], kmeans.lchord)
+colnames(kmeans.logchord) <- c("Key","K2","K3","K4","K5","K6","K7","K8","K9",
+                               "K10","K11","K12","K13","K14","K15","K16","K17",
+                               "K18","K19","K20")
+save(file = here::here("Data_Output/Best_cluster_solution_10252021.RData"),
+     "kmeans.logchord","gci.df.methods")
+```
+

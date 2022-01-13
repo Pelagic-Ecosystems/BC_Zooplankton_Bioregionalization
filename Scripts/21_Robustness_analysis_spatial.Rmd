@@ -1,0 +1,180 @@
+---
+title: "Robustness_analysis_spatial"
+author: "Patrick Pata"
+date: "26/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load library and files with the original bioregionalization
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(matrixStats)
+library(rnaturalearth)
+library(marmap)
+library(mapdata)
+library(here)
+`%notin%` <- Negate(`%in%`)
+source(here::here("Functions/p_biplot_pca.R"))
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+
+theme_set(theme_bw())
+```
+
+Visualize number of samples when gridded
+```{r}
+res <- 0.25
+lon_grid <- seq(-145-res,-122,res)
+lat_grid <- seq(47, 56, res)
+  
+zgrid <- zoopmeta %>% 
+  mutate(Season = if_else(Month <= 6, "Spring", "Summer")) %>% 
+  dplyr::select(Key, Bioregion, Longitude, Latitude, Year, Season) %>% 
+  mutate(lon_bin = lon_grid[ .bincode(Longitude, breaks = lon_grid) ], 
+         lat_bin = lat_grid[ .bincode(Latitude, breaks = lat_grid) ]) 
+
+# identify unique grid cells
+zcells <- zgrid %>% 
+  dplyr::select(lon_bin,lat_bin) %>% 
+  group_by(lon_bin,lat_bin) %>%
+  summarise(n = n()) %>%
+  distinct()
+
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+# get bathymetry data
+bathy = getNOAA.bathy(lon1 = -150, lon2 = -122, lat1 = 45, lat2 = 60, resolution = 1)
+# convert bathymetry to data frame
+bathy = fortify.bathy(bathy)
+
+
+map.bc <- ggplot(data = world) +
+  geom_sf(fill = "#A9A9A9") + 
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200,-500,-1000), size=c(0.2), colour="black") +
+  # geom_contour(data = bathy, aes(x=x, y=y, z=z),
+  #              breaks=c(-200), size=c(0.6), colour="grey") +
+  coord_sf(xlim = c(-145.25, -122), ylim = c(47, 56.1), expand = FALSE) +
+  xlab("") + ylab("") + theme_bw() + 
+  theme(legend.position =  "bottom", 
+        legend.title = element_text(color = 'black', size = 16),
+        legend.text = element_text(size = 16), 
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 16), 
+        axis.text = element_text(size = 16)) +
+  theme(legend.position = "right") +
+  scale_x_continuous(breaks = c(-145,-140,-135,-130,-125))
+
+png(here::here("Figures/Supp_figs/Map_nsamples_025.png"),
+    width = 10, height = 7, units = "in", res = 600)
+map.bc +
+  geom_tile(data = zcells,
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=n),
+            alpha = 0.8) +
+  scale_fill_viridis_c(name = "# samples", trans = "log", 
+                       breaks = c(1,5,10,50,100)) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500,-1000), size=c(0.2), colour="black") 
+dev.off()
+```
+
+
+# Spatial robustness analysis
+1. Grid samples and assign grid cell variable
+2. Randomly subsample in each cell
+3. Try other resolutions (0.05, 0.1, 0.25, 0.5, 1)
+```{r}
+set.seed(888)
+
+# res <- 0.1
+for (res in c(0.01,0.05,0.1,0.25,0.5,1,2)) {
+  lon_grid <- seq(-145-res,-122,res)
+  lat_grid <- seq(47, 56, res)
+  
+  # grid samples
+  zgrid <- zoopmeta %>% 
+    mutate(Season = if_else(Month <= 6, "Spring", "Summer")) %>% 
+    dplyr::select(Key, Bioregion, Longitude, Latitude, Year, Season) %>% 
+    mutate(lon_bin = lon_grid[ .bincode(Longitude, breaks = lon_grid) ], 
+           lat_bin = lat_grid[ .bincode(Latitude, breaks = lat_grid) ]) 
+  
+  # identify unique grid cells
+  zcells <- zgrid %>% 
+    dplyr::select(lon_bin,lat_bin) %>% 
+    # group_by(lon_bin,lat_bin) %>% 
+    # summarise(n = n()) %>% 
+    distinct() %>% 
+    rownames_to_column(var = "cell_id")
+  
+  # label samples by unique grid cells
+  zgrid <- zgrid %>% 
+    left_join(zcells, by = c("lon_bin","lat_bin"))
+  
+  keys <- bioregions %>% 
+    rownames_to_column("idx") %>% 
+    mutate(idx = as.numeric(idx))
+  
+  bg.strat <- matrix(nrow = 0, ncol = 7)
+  
+  for (n in c(1:1000)) {
+    # Create new abundance matrix
+    sub.abund.new <- zoop.log[0,]
+    sub.keys.new <- bioregions[0,]
+    
+    for (i in c(1:nrow(zcells))) {
+      ii <- which(zgrid$cell_id == i)
+      sub.keys <- bioregions[ii,] %>% 
+        rownames_to_column("idx") %>% 
+        mutate(idx = as.numeric(idx))
+      sub.abund <- zoop.log[ii,]
+      
+      sk <- sample(keys$idx, size = 1, replace = FALSE)
+      
+      sub.keys <- keys[sk,]
+      sub.abund <- zoop.log[sk,]
+      
+      sub.abund.new <- bind_rows(sub.abund.new, sub.abund)
+      sub.keys.new <- bind_rows(sub.keys.new, sub.keys[,2:3])
+    }
+    
+    # Bioregionalization
+    
+    # recalculate log-chord table
+    sub.abund.new <- sub.abund.new[, colSums(sub.abund.new) > 0]
+    sub.abund.new <- decostand( sub.abund.new, method = "normalize")
+    nsp <- ncol(sub.abund.new)
+    
+    # cluster with K-means, 4 bioregions
+    km <- kmeans(sub.abund.new, 4, nstart = 10, iter.max = 1000)
+    sub.keys.new$newregions <- km$cluster
+    
+    # Get the % of samples with different bioregionalization
+    # Consider that the maximum cluster for each row in the crosstab table corresponds to the original bioreigion. 
+    A <- table(sub.keys.new[,2:3])
+    B <- rowSums(A) - rowMaxs(A)
+    C <- sum(B) / sum(A) * 100
+    
+    # Save percentages
+    bg.strat <- rbind(bg.strat, c(nsp, nrow(sub.abund.new), C, (B/sum(A)*100) ))
+  }
+  
+  colnames(bg.strat) <- c("nsp","nsamp","percwrong","OS","DS","NS","DF")
+  
+  print(res)
+  
+  bg.strat %>% 
+    as_tibble() %>% 
+    # dplyr::select(-c(nsp,n)) %>% 
+    summary() %>% 
+    print()
+}
+```
+
+

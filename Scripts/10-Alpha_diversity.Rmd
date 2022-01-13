@@ -1,0 +1,150 @@
+---
+title: "Alpha_diversity"
+author: "Patrick Pata"
+date: "26/10/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(fossil)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+```
+
+
+# Species accumulation
+```{r, fig.width=8, fig.height=6}
+set.seed(888)
+
+regions <- levels(bioregions$Bioregion)
+
+zoop.accum <- tibble(Bioregion = character(), sites = numeric(), richness = numeric(),
+             sd = numeric())
+for (k in c(1:4)) {
+  ii <- which(zoopmeta$Bioregion == regions[k])
+  cc <- specaccum(zoop_abundance[ii,], method = "random", permutations = 1000)
+  cc <- data.frame(Bioregion = regions[k], sites = cc$sites, 
+                   richness = cc$richness, sd = cc$sd)
+  zoop.accum <- bind_rows(zoop.accum, cc)
+}
+zoop.accum <- zoop.accum %>% 
+  mutate(Bioregion = as_factor(Bioregion))
+
+
+g <- ggplot(zoop.accum, aes(x = sites, y = richness, group = Bioregion)) +
+  geom_ribbon(aes(x = sites,y = richness, ymin = richness - sd, ymax = richness + sd, 
+                  fill = Bioregion), alpha = .2) +
+  geom_line(size = 1, aes (color = Bioregion)) +
+  scale_fill_manual(values = clrs.bioregion) +
+  scale_color_manual(values = clrs.bioregion) +
+  theme_bw() +
+    theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 20, face = 'bold'),
+        legend.text = element_text(size = 20),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 20)) + 
+  ylab("Species Richness") + xlab ("# Samples")+ ylim(25,160)
+g
+
+# png(here::here(paste0("Figures/species_accum_",Sys.Date(),".png")),
+#     width = 8, height = 5, units = "in", res = 300)
+# print(g)
+# dev.off()
+```
+
+# Calculate species accumulation of the 455 taxa
+```{r, fig.width=8, fig.height=6}
+zoop_abundance_all <- zoop_sub %>% 
+  select(Key, Species, Abundance.m2) %>% 
+  pivot_wider(names_from = Species, values_from = Abundance.m2, values_fill = 0) %>% 
+  column_to_rownames("Key")
+
+
+set.seed(888)
+
+regions <- levels(bioregions$Bioregion)
+
+zoop.accum.all <- tibble(Bioregion = character(), 
+                         sites = numeric(), richness = numeric(),
+             sd = numeric())
+for (k in c(1:4)) {
+  ii <- which(zoopmeta$Bioregion == regions[k])
+  cc <- specaccum(zoop_abundance_all[ii,], method = "random", permutations = 1000)
+  cc <- data.frame(Bioregion = regions[k], sites = cc$sites, 
+                   richness = cc$richness, sd = cc$sd)
+  zoop.accum.all <- bind_rows(zoop.accum.all, cc)
+}
+zoop.accum.all <- zoop.accum.all %>% 
+  mutate(Bioregion = as_factor(Bioregion))
+
+
+g <- ggplot(zoop.accum.all, aes(x = sites, y = richness, group = Bioregion)) +
+  geom_ribbon(aes(x = sites,y = richness, ymin = richness - sd, ymax = richness + sd, 
+                  fill = Bioregion), alpha = .2) +
+  scale_fill_manual(values = clrs.bioregion) +
+  geom_line(size = 1.5, aes (color = Bioregion)) +
+  scale_color_manual(values = clrs.bioregion) +
+  theme_bw() +
+    theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 20, face = 'bold'),
+        legend.text = element_text(size = 20),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 20)) + 
+  ylab("Species Richness") + xlab ("# Samples")+ ylim(25,400)
+g
+
+# png(here::here(paste0("Figures/species_accum_all_taxa_",Sys.Date(),".png")),
+#     width = 8, height = 5, units = "in", res = 300)
+# print(g)
+# dev.off()
+```
+
+
+Merge species accumulation curves for sp=160 and sp=455
+```{r, fig.width=8, fig.height=6}
+zoop.accum.merge <- bind_rows( mutate(zoop.accum, sp = "160"),
+                               mutate(zoop.accum.all, sp = "455") )
+
+
+g <- ggplot(zoop.accum.merge, aes(x = sites, y = richness,
+                                  colour = Bioregion, linetype = sp)) +
+  # geom_ribbon(aes(x = sites,y = richness, ymin = richness - sd, ymax = richness + sd, 
+  #                 fill = Bioregion), alpha = .2) +
+  # geom_line(size = 1, aes(color = Bioregion, linetype = sp)) +
+  # scale_linetype_manual(values=c("solid", "dashed"))+
+  geom_line(data = filter(zoop.accum.merge, sp == "455"),
+                          size = 1, aes(color = Bioregion), linetype = "dashed") +
+  geom_line(data = filter(zoop.accum.merge, sp == "160"),
+                          size = 1, aes(color = Bioregion), linetype = "solid") +
+  scale_fill_manual(values = clrs.bioregion) +
+  scale_color_manual(values = clrs.bioregion) +
+  theme_bw() +
+    theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16)) + 
+  ylab("Species Richness") + xlab ("# Samples")+
+  scale_x_continuous(breaks = c(0,250,500,750,1000,1250))+
+  scale_y_continuous(breaks = c(0,100,200,300,400))
+g
+
+png(here::here(paste0("Figures/species_accum_",Sys.Date(),".png")),
+    width = 5, height = 4, units = "in", res = 300)
+g
+dev.off()
+```
+

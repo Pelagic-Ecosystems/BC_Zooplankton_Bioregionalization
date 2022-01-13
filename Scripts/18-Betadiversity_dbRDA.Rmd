@@ -1,0 +1,125 @@
+---
+title: "Betadiversity_dbRDA"
+author: "Patrick Pata"
+date: "10/11/2021"
+output: html_document
+---
+
+This connects 11-Beta_diversity with the environmental data and RDA in 15-RDA. Note that beta-diversity would be recalculated for the subset of samples that contain a complete set of environmental variables.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(adespatial)
+library(ggrepel)
+library(cowplot)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+load(here::here("Data_Output/dbMEM_significant_MEMS_11072021.RData")) # contains the subset envi vars
+theme_set(theme_bw())
+```
+
+# Calculate beta-diversity decomposition on the subset of zooplankton samples.
+```{r}
+rm(zoop.rda) # contains logchord-transformed abundance
+zoop.rda <- vars.envi %>% 
+  dplyr::select(Key) %>% 
+  left_join(rownames_to_column(zoop_abundance, var = "Key")) %>% 
+  dplyr::select(-Key)
+
+bdcomp.bcd.pa <- beta.div.comp(zoop.rda, coef="S", quant=FALSE)
+
+# Total beta diversity [0, 0.5] and the % contribution of each component
+bdcomp.bcd.pa$part
+
+# Extract matrix of components
+bdcomp.dissim <- as.matrix(bdcomp.bcd.pa$D)
+bdcomp.repl <- as.matrix(bdcomp.bcd.pa$repl)
+bdcomp.rich <- as.matrix(bdcomp.bcd.pa$rich)
+
+```
+
+
+# Explaining components by environmental variables with dbrda
+```{r, eval = FALSE}
+envisub <- vars.envi %>% 
+  dplyr::select(-Key)
+
+# Replacement
+bd.repl.dbrda <- dbrda(bdcomp.repl ~., 
+                       data = envisub, add = "cailliez")
+
+# Richness difference
+bd.rich.dbrda <- dbrda(bdcomp.rich ~., 
+                       data = envisub, add = "cailliez")
+
+RsquareAdj(bd.repl.dbrda)
+head(round( bd.repl.dbrda$CCA$eig/bd.repl.dbrda$tot.chi*100, digits = 4) )
+
+RsquareAdj(bd.rich.dbrda)
+head(round( bd.rich.dbrda$CCA$eig/bd.rich.dbrda$tot.chi*100, digits = 4) )
+
+
+plot(bd.repl.dbrda,
+     scaling = 1, display = c("lc", "cn"),
+     main = "Replacement explained by environmental variables" )
+plot(bd.rich.dbrda,
+     scaling = 1, display = c("lc", "cn"),
+     main = "Richness difference explained by environmental variables" )
+
+# # Is the dbRDA significant?
+# anova(bd.repl.dbrda)
+# anova(bd.rich.dbrda)
+```
+
+# Similar analysis but with the abundance data
+```{r}
+bdcomp.bcd.ab <- beta.div.comp(zoop.rda, coef="S", quant=TRUE)
+
+# Total beta diversity [0, 0.5] and the % contribution of each component
+bdcomp.bcd.ab$part
+
+# Extract matrix of components
+bdcomp.dissim.ab <- as.matrix(bdcomp.bcd.ab$D)
+bdcomp.repl.ab <- as.matrix(bdcomp.bcd.ab$repl)
+bdcomp.rich.ab <- as.matrix(bdcomp.bcd.ab$rich)
+
+# Replacement
+bd.repl.dbrda.ab <- dbrda(bdcomp.repl.ab ~., 
+                       data = envisub, add = "cailliez")
+
+# Richness difference
+bd.rich.dbrda.ab <- dbrda(bdcomp.rich.ab ~., 
+                       data = envisub, add = "cailliez")
+
+
+RsquareAdj(bd.repl.dbrda.ab)
+head(round( bd.repl.dbrda.ab$CCA$eig/bd.repl.dbrda.ab$tot.chi*100, digits = 4) )
+
+RsquareAdj(bd.rich.dbrda.ab)
+head(round( bd.rich.dbrda.ab$CCA$eig/bd.rich.dbrda.ab$tot.chi*100, digits = 4) )
+
+
+plot(bd.repl.dbrda.ab,
+     scaling = 1, display = c("lc", "cn"),
+     main = "Replacement explained by environmental variables" )
+plot(bd.rich.dbrda.ab,
+     scaling = 1, display = c("lc", "cn"),
+     main = "Richness difference explained by environmental variables" )
+```
+
+Save output
+```{r, eval = FALSE}
+# save(bdcomp.bcd.pa, bdcomp.bcd.ab, bd.repl.dbrda, bd.rich.dbrda,
+#      bd.repl.dbrda.ab, bd.rich.dbrda.ab,
+#      file = here::here("Data_Output/Betadiv_dbRDA_11102021.RData"))
+```
+
+

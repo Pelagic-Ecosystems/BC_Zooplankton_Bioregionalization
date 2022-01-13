@@ -1,0 +1,438 @@
+---
+title: "dbMEM"
+author: "Patrick Pata"
+date: "02/11/2021"
+output: html_document
+---
+
+# dbMEM analysis
+The process is to first identify if there are significant linear trends for the spatial (or temporal) coordinates. If there are, these need to be included in the variance partitioning which means that in the dbMEM analysis, the response matrix needs to be detrended first to identify a separate set of dbMEM variables (which are orthogonal to the linear trends). The significant dbMEM axes would then be manually inspected and classified if these are broad-scale or fine-scale structures. Then, variance partitioning is done to have an overall model to identify how much the environmental variables induce the spatial structures of the linear trends and the more complicated dbMEM trends + the scale of the finer structures which can be interpreted as autocorrelation due to neutral processes. Note that when interpreting the shared variance between the environmental variables and the dbMEM structures: these could mean either the environment structured the community or there are unaccounted for processes that structure both the environmental variables and the community.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+library(tictoc)
+library(cowplot)
+library(ade4) # required for quickMEM
+library(adegraphics) # required for quickMEM
+library(adespatial) # required for quickMEM
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+source(here::here("Functions/quickMEM.R"))
+theme_set(theme_bw())
+```
+
+Prepare the space and time variables for dbMEM. Match this with the subset of samples which are used in the environmental RDA. Centering the variables with scale(center = TRUE, scale = FALSE) does not affect the dbMEM analysis but is useful for plotting.
+```{r}
+vars.envi <- zoopenvi %>% 
+  mutate(TScov = CoverageTS/Tow.Depth) %>% 
+  filter(!(Temp.surf > 0 & TScov < 0.5 & CoverageTS < 50)) %>% 
+  filter(Temp.surf > 0) %>% 
+  filter(Chla > 0) %>% 
+  filter(is.na(N2V2.030) == FALSE ) %>% 
+  dplyr::select(Key, depth = Bottom.Depth, salinity = Sali.net, temperature = Temp.net,
+         PAR, NPGO, stratification = N2V2.030, microplankton = micro,
+         picoplankton = pico, PDO, ENSO)
+
+zoop.rda <- zoop.logchord %>% 
+  rownames_to_column("Key") %>% 
+  filter(Key %in% vars.envi$Key) %>% 
+  column_to_rownames("Key")
+
+vars.xy <- dplyr::select(vars.envi, Key) %>% 
+  left_join(dplyr::select(zoopmeta, Key, Longitude, Latitude), by="Key") %>% 
+  dplyr::select(-Key) %>% 
+  mutate(Longitude = scale(Longitude, center = TRUE, scale = FALSE),
+         Latitude = scale(Latitude, center = TRUE, scale = FALSE))
+
+# Because there are blanks in sampled months, using a single continuous time variable does not make sense because you cant fit sine waves when almost have the year is not available, thus Year and Day of year are used for the temporal dbmem.
+vars.date <- select(vars.envi, Key) %>% 
+  left_join(select(zoopmeta, Key, Year), by="Key") %>% 
+  left_join(select(zoopenvi, Key, Day = DayOfYear), by="Key") %>% 
+  select(-Key) %>% 
+  mutate(Year = scale(Year, center = TRUE, scale = FALSE),
+         Day = scale(Day, center = TRUE, scale = FALSE))
+```
+
+Are there significant linear trends?
+```{r}
+# **SPACE**
+rda.linear.space <- rda(zoop.rda ~., vars.xy)
+RsquareAdj(rda.linear.space)$adj.r.squared
+
+#  VIF
+vif.cca(rda.linear.space)
+# Anova to check if significant
+# Global:
+anova(rda.linear.space, permutations = how(nperm = 999))
+# Canonical axes:
+anova(rda.linear.space, by = "axis", permutations = how(nperm = 99))
+# Variance partitioning with envi vars
+vp <- varpart(zoop.rda, select(vars.envi, -Key), vars.xy)
+vp
+
+# **TIME**
+rda.linear.time <- rda(zoop.rda ~., vars.date)
+RsquareAdj(rda.linear.time)$adj.r.squared
+
+#  VIF
+vif.cca(rda.linear.time)
+# Anova to check if significant
+# Global:
+anova(rda.linear.time, permutations = how(nperm = 999))
+# Canonical axes:
+anova(rda.linear.time, by = "axis", permutations = how(nperm = 99))
+# Variance partitioning with envi vars
+vp <- varpart(zoop.rda, select(vars.envi, -Key), vars.date)
+vp
+
+
+rda.linear.space <- rda(zoop.rda ~ Latitude, vars.xy)
+RsquareAdj(rda.linear.space)$adj.r.squared
+```
+
+
+Using quickMEM(): This function already checks if a linear trends needs to be detrended. Refer to Borcard (2018) page 327 for a description on how it goes through the entired dbMEM analysis process. 
+```{r, eval=FALSE}
+tic("dbmem space") # ~1 hour
+dbmem.space <- quickMEM(zoop.rda, vars.xy)
+toc()
+
+# save(dbmem.space, file = here::here("Data_Output/dbmem_space_11052021.RData"))
+
+```
+
+Inspect each significant dbMEM axis and identify the scale
+```{r, fig.width=8, fig.height=6}
+load(here::here("Data_Output/dbmem_space_11052021.RData"))
+
+summary(dbmem.space)
+# Eigenvalues
+dbmem.space[[2]]
+
+# Extract and plot RDA results from a quickMEM output (scaling 2)
+plot(dbmem.space$RDA, scaling = 2)
+sp.scores2 <- scores(dbmem.space$RDA, choices = 1:2,
+         scaling = 2, display = "sp")
+arrows(0, 0, sp.scores2[ ,1] * 0.9, sp.scores2[ ,2] * 0.9,
+       length = 0, lty = 1, col = "red")
+
+# Number of significant dbMEM
+nrow(dbmem.space$fwd.sel)
+# Variance explained of the forward selected dbMEMs
+RsquareAdj(dbmem.space$RDA)$adj.r.squared
+# Results of forward selection
+dbmem.space[[3]]
+# The reduced set of significant dbMEM axes
+dbmem.red <- dbmem.space$dbMEM_red_model
+
+```
+
+Prepare mapping to inspect spatial dbmem scales
+```{r, eval = FALSE}
+library(rnaturalearth)
+library(marmap)
+library(mapdata)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# get bathymetry data
+bathy = getNOAA.bathy(lon1 = -150, lon2 = -122, lat1 = 45, lat2 = 60, resolution = 1)
+# convert bathymetry to data frame
+bathy = fortify.bathy(bathy)
+
+# The background ggplot map
+map.bc <- ggplot(data = world) +
+  geom_sf(fill = "#A9A9A9") + 
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-500,-1000), size=c(0.3), colour="grey") +
+  # geom_contour(data = bathy, aes(x=x, y=y, z=z),
+  #              breaks=c(-200), size=c(0.6), colour="grey") +
+  coord_sf(xlim = c(-145.25, -122), ylim = c(47, 56.1), expand = FALSE) +
+  xlab("") + ylab("") + theme_bw() + 
+  theme(legend.position =  "right", 
+        legend.title = element_text(color = 'black', size = 12),
+        legend.text = element_text(size = 12), 
+        plot.title = element_text(size = 12, face = "bold"),
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12)) +
+  scale_x_continuous(breaks = c(-145,-140,-135,-130,-125))
+
+map.bc
+```
+
+Plot what each significant axis looks like.
+```{r, fig.width=8, fig.height=6, eval=FALSE}
+dbmem.red.xy <- select(vars.envi, Key) %>% 
+  left_join(select(zoopmeta, Key, Longitude, Latitude, Bioregion), by="Key") %>% 
+  select(-Key) %>% 
+  cbind(dbmem.red)
+
+res <- 0.1
+lon_grid <- seq(-145-res,-122,res)
+lat_grid <- seq(47, 56, res)
+
+memgrid <- dbmem.red.xy %>% 
+  select(-Bioregion) %>% 
+  mutate(lon_bin = lon_grid[ .bincode(Longitude, breaks = lon_grid) ], 
+         lat_bin = lat_grid[ .bincode(Latitude, breaks = lat_grid) ]) %>% 
+  group_by(lon_bin, lat_bin) %>% 
+  summarise(across(everything(), mean)) %>% 
+  ungroup() %>% 
+  mutate(lon_bin = lon_bin + (res/2), lat_bin = lat_bin+(res/2))
+
+memax <- colnames(select(memgrid, starts_with("MEM")))
+
+for (i in memax[1:8]) {
+  g <- map.bc +
+    geom_tile(data = memgrid,
+              aes_string(x = "lon_bin", y = "lat_bin", fill = i),
+              # aes(x=lon_bin+(res/2), y = lat_bin+(res/2),fill = i),
+              alpha = 0.9, width = res, height = res) +
+    scale_fill_gradient2(midpoint = 0, name = "dbMEM\nvalue") +
+    ggtitle(i)
+  
+  png(paste0("Figures/Supp_figs/dbMEM_",i,"_",Sys.Date(),".png"),
+      width = 8, height = 6, units = "in", res = 300)
+  print(g)
+  dev.off()
+}
+  
+```
+
+```{r}
+map.bc +
+    geom_tile(data = memgrid,
+              aes_string(x = "lon_bin", y = "lat_bin", fill = i),
+              # aes(x=lon_bin+(res/2), y = lat_bin+(res/2),fill = i),
+              alpha = 0.9, width = res, height = res) +
+    scale_fill_gradient2(midpoint = 0, name = "dbMEM\nvalue") +
+    ggtitle(i) 
+```
+
+
+Variance partitioning of spatial structures
+```{r, fig.width=8, fig.height=6}
+# Arbitrarily split the dbMEM axes to broad & fine scale components after inspecting the dbMEM distribution
+dbmem.space.broad <- dbmem.red[,1:5]
+# dbmem.space.medium <- dbmem.red[,6:16]
+# dbmem.space.fine <- dbmem.red[,17:25]
+dbmem.space.medfine <- dbmem.red[,6:25]
+
+# Variance partitioning of 3 dbmem scales
+vp <- varpart(zoop.rda, vars.xy, dbmem.space.broad, dbmem.space.medfine)
+vp
+plot(vp, digits = 2, Xnames = c("Linear","Broad","Medium-Fine"))
+
+# Variance partitioning with envi variables and linear trend
+vp <- varpart(zoop.rda, select(vars.envi,-Key), 
+              vars.xy, dbmem.space.broad, dbmem.space.medfine)
+vp
+plot(vp, digits = 2, Xnames = c("Environment","Linear","Broad","Medium-Fine"))
+
+# Combine linear and broad scale structure
+vp <- varpart(zoop.rda, select(vars.envi,-Key), 
+              cbind(vars.xy, dbmem.space.broad), dbmem.space.medfine)
+vp
+plot(vp, digits = 2, Xnames = c("Environment","Linear & Broad","Medium-Fine"))
+```
+
+# Time
+```{r, eval=FALSE}
+tic("dbmem time") # 
+dbmem.day <- quickMEM(zoop.rda, vars.date$Day)
+dbmem.year <- quickMEM(zoop.rda, vars.date$Year)
+toc()
+
+# save(dbmem.day, dbmem.year, file = here::here("Data_Output/dbmem_time_11052021.RData"))
+```
+
+# dbMEM Year
+Inspect annual dbmem
+```{r}
+# load(here::here("Data_Output/dbmem_time_11052021.RData"))
+
+summary(dbmem.year)
+# Eigenvalues
+dbmem.year[[2]]
+
+# Extract and plot RDA results from a quickMEM output (scaling 2)
+plot(dbmem.year$RDA, scaling = 2)
+
+# Number of significant dbMEM
+nrow(dbmem.year$fwd.sel)
+# Variance explained of the forward selected dbMEMs
+RsquareAdj(dbmem.year$RDA)$adj.r.squared
+# Results of forward selection
+dbmem.year[[3]]
+# The reduced set of significant dbMEM axes
+dbmem.red <- dbmem.year$dbMEM_red_model
+```
+
+```{r, fig.width=10, fig.height=8}
+# Each year value would have the same dbmem value
+dbmem.red.year <- select(vars.envi, Key) %>% 
+  left_join(select(zoopmeta, Key, Year, Bioregion), by="Key") %>% 
+  select(-c(Key,Bioregion)) %>% 
+  cbind(dbmem.red) %>% 
+  arrange(Year) %>% 
+  # mutate(Year = as.factor(Year)) %>% 
+  group_by(Year) %>% 
+  slice(c(1,n())) %>% 
+  pivot_longer(cols = -Year, names_to = "MEM", values_to ="values") %>% 
+  mutate(MEM = as.factor(MEM)) %>% 
+  mutate(MEM = fct_relevel(MEM, "MEM1","MEM2","MEM3","MEM4","MEM5","MEM6","MEM7",
+                           "MEM8","MEM9","MEM10","MEM11","MEM13"))
+
+# Get climate indices
+clim <-  select(zoopmeta, Key, Year, Month) %>% 
+  left_join(select(zoopenvi, Key, NPGO, PDO, ENSO)) %>% 
+  mutate(YearMonth = Year + (Month/12)) %>% 
+  group_by(YearMonth) %>% 
+  slice(c(1,n())) %>% 
+  select(-Key) %>% 
+  arrange(YearMonth) %>% 
+  ungroup() %>% 
+  mutate(ENSO = ENSO - mean(ENSO)) %>% 
+  pivot_longer(cols = -c(Year,Month,YearMonth), 
+               names_to = "Index", values_to = "values") 
+  
+
+
+a <- ggplot(dbmem.red.year, aes(x = Year, y = values)) +
+  geom_bar(stat = "identity") + 
+  ylab("dbMEM value") + 
+  facet_wrap(~MEM)
+
+b <- ggplot(clim, aes(x = YearMonth, y = values)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~Index, scales = "free", ncol = 4)
+
+plot_grid(a,b,ncol = 1, rel_heights = c(3,1) )
+
+
+png(here::here(paste0("Figures/Supp_figs/dbMEM_year_",Sys.Date(),".png")),
+width = 10, height = 8, units = "in", res = 300)
+a
+dev.off()
+```
+
+Variance partitioning
+```{r}
+# Arbitrarily split the dbMEM axes to broad & fine scale components after inspecting the dbMEM distribution
+dbmem.year.broad <- dbmem.red[,1:7]
+dbmem.year.fine <- dbmem.red[,8:12]
+
+# Variance partitioning of 3 dbmem scales
+vp <- varpart(zoop.rda, vars.date$Year, dbmem.year.broad, dbmem.year.fine)
+vp
+plot(vp, digits = 2, Xnames = c("Linear","Broad","Fine"))
+
+
+vp <- varpart(zoop.rda, select(vars.envi, -Key),
+              vars.date$Year, dbmem.year.broad, dbmem.year.fine)
+vp
+plot(vp, digits = 2, Xnames = c("Environment","Linear","Broad","Fine"))
+
+```
+
+# dbMEM Day
+```{r}
+summary(dbmem.day)
+# Eigenvalues
+dbmem.day[[2]]
+
+# Extract and plot RDA results from a quickMEM output (scaling 2)
+plot(dbmem.day$RDA, scaling = 2)
+
+# Number of significant dbMEM
+nrow(dbmem.day$fwd.sel)
+# Variance explained of the forward selected dbMEMs
+RsquareAdj(dbmem.day$RDA)$adj.r.squared
+# Results of forward selection
+dbmem.day[[3]]
+# The reduced set of significant dbMEM axes
+dbmem.red <- dbmem.day$dbMEM_red_model
+```
+
+```{r, fig.width=10, fig.height=12}
+# Each day value would have the same dbmem value
+dbmem.red.day <- select(vars.envi, Key) %>% 
+  left_join(select(zoopenvi, Key, Day = DayOfYear)) %>% 
+  select(-c(Key)) %>% 
+  cbind(dbmem.red) %>% 
+  arrange(Day) %>% 
+  # mutate(Day = as.factor(Day)) %>% 
+  group_by(Day) %>% 
+  slice(c(1,n())) %>% 
+  pivot_longer(cols = -Day, names_to = "MEM", values_to ="values") %>% 
+  ungroup() %>% 
+  mutate(MEM = as.factor(MEM)) %>% 
+  mutate(MEM = fct_relevel(MEM, colnames(dbmem.red))) %>% 
+  # Select only the first 20 MEMs for plotting
+  filter(MEM %in% c("MEM1","MEM2","MEM3","MEM4","MEM6","MEM7",
+                    "MEM8","MEM9","MEM10","MEM12","MEM13","MEM14",
+                    "MEM15","MEM16","MEM17","MEM18","MEM19","MEM20",
+                    "MEM22","MEM23"))
+  
+
+png(here::here(paste0("Figures/Supp_figs/dbMEM_day_",Sys.Date(),".png")),
+width = 10, height = 12, units = "in", res = 300)
+ggplot(dbmem.red.day, aes(x = Day, y = values)) +
+  geom_bar(stat = "identity") +
+  ylab("dbMEM value") + xlab("Day of year") +
+  facet_wrap(~MEM, scales = "free_y", ncol = 4)
+dev.off()
+```
+
+```{r}
+# Split the dbMEM axes to broad & fine scale components after inspecting the dbMEM distribution. It is a bit difficult to identify specific trends for the day-dbmems so here the table is simply divided by 2. Incidentally, at MEM26 onwards, there are more fine-scale oscillations in values that likely represent autocorrelation.
+dbmem.day.broad <- dbmem.red[,1:17]
+dbmem.day.fine <- dbmem.red[,18:34]
+
+# Variance partitioning of 3 dbmem scales
+vp <- varpart(zoop.rda, vars.date$Day, dbmem.day.broad, dbmem.day.fine)
+vp
+plot(vp, digits = 2, Xnames = c("Linear","Broad","Fine"))
+
+
+vp <- varpart(zoop.rda, select(vars.envi, -Key),
+              vars.date$Day, dbmem.day.broad, dbmem.day.fine)
+vp
+plot(vp, digits = 2, Xnames = c("Environment","Linear","Broad","Fine"))
+
+```
+
+
+# dbMEM Year+Day varpart
+Group fine and broad temporal structures
+```{r}
+dbmem.yearday.broad <- bind_cols(vars.date, dbmem.year.broad, dbmem.day.broad)
+dbmem.yearday.fine <- bind_cols(dbmem.year.fine, dbmem.day.fine)
+
+vp <- varpart(zoop.rda, dplyr::select(vars.envi, -Key),
+              dbmem.yearday.broad, dbmem.yearday.fine)
+vp
+plot(vp, digits = 2, Xnames = c("Environment","Broad","Fine"))
+
+
+```
+
+Save the organized dbMEM variables 
+```{r}
+save(file = here::here("Data_Output/dbMEM_significant_MEMS_11072021.RData"),
+     dbmem.yearday.broad, dbmem.yearday.fine,
+     dbmem.space.broad, dbmem.space.medfine,
+     vars.envi, vars.xy, vars.date,
+     zoop.rda)
+```
+
+

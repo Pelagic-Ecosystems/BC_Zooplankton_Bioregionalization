@@ -1,0 +1,239 @@
+---
+title: "Bioregions_geographic_space"
+author: "Patrick Pata"
+date: "21/10/2021"
+output: html_document
+---
+
+First individual maps of the bioregions are generated and combined maps which may have overlapping points. The overlap in points can be organized by gridding the area and selecting the most common bioregoin assignment for that area.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(tictoc)
+library(rnaturalearth)
+library(marmap)
+library(mapdata)
+library(egg)
+library(cowplot)
+library(here)
+
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+
+# source(here::here("Functions/p_biplot_pca.R"))
+
+
+```
+
+# Setup the background map and bathymetric contours
+```{r}
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+# get bathymetry data
+bathy = getNOAA.bathy(lon1 = -150, lon2 = -122, lat1 = 45, lat2 = 60, resolution = 1)
+# convert bathymetry to data frame
+bathy = fortify.bathy(bathy)
+```
+
+
+Fig 1. Distribution of samples in space and time
+```{r, fig.width=10, fig.height=9.5}
+zoopmeta2 <- zoopmeta %>% 
+  arrange(Year) %>% 
+  mutate(`Time of day` = Twilight) %>% 
+  mutate(`Time of day` = fct_recode(`Time of day`,"Day" = "Daylight"))
+
+g1 <- ggplot(data = world) +
+  geom_sf(fill = "#A9A9A9") + 
+  coord_sf(xlim = c(-145.25, -122), ylim = c(47, 56.1), expand = FALSE) +
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200,-500,-1000), size=c(0.2), colour="black") +
+  xlab("") + ylab("") + theme_bw() + 
+  theme(legend.position =  "bottom", 
+        legend.key.width = unit(1, "inch"),
+        legend.title = element_text(color = 'black', size = 12),
+        legend.text = element_text(size = 12), 
+        plot.title = element_text(size = 12, face = "bold"),
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12)) +
+  scale_x_continuous(breaks = c(-145,-140,-135,-130,-125)) +
+  geom_point(data = zoopmeta2, 
+             aes(x = Longitude, y = Latitude, colour = Year), 
+            size = 1.5, alpha = 0.9) +
+  scale_color_viridis_c(breaks = seq(1996, 2014, 2), expand = c(0, 0), 
+                        name = "Sample\nYear")
+
+g2 <- ggplot(data = zoopmeta2,
+       aes(x = Year, fill = `Time of day`)) +
+  geom_bar(position = "stack") +
+  ylab("# Samples") +
+  scale_x_continuous(breaks = c(1995,2000,2005,2010))+ 
+  scale_y_continuous(expand = c(0,0)) +
+  theme(axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12), 
+        legend.position = "none") 
+g3 <- ggplot(data = zoopmeta2,
+       aes(x = as.factor(Month), fill = `Time of day`)) +
+  geom_bar(position = "stack") +
+  ylab("# Samples") + xlab("Month") +
+  scale_x_discrete(labels = c("Apr","May","Jun","Jul","Aug","Sep","Oct")) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme(legend.title = element_text(color = 'black', size = 12),
+        legend.text = element_text(size = 12), 
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12)) 
+
+g4 <- cowplot::plot_grid(g2,g3, align = "h", nrow = 1, 
+                         rel_widths = c(0.85,1))
+
+png(here::here("Figures/Fig1_sampledist_v3.png"),
+width = 10, height = 9.5, units = "in", res = 600)
+cowplot::plot_grid(g1,g4, ncol = 1, rel_heights = c(3,1))
+dev.off()
+```
+
+
+Create the ggplot object which is the background map
+```{r, fig.width=10, fig.height=7}
+map.bc <- ggplot(data = world) +
+  geom_sf(fill = "#A9A9A9") + 
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200,-500,-1000), size=c(0.2), colour="black") +
+  # geom_contour(data = bathy, aes(x=x, y=y, z=z),
+  #              breaks=c(-200), size=c(0.6), colour="grey") +
+  coord_sf(xlim = c(-145.25, -122), ylim = c(47, 56.1), expand = FALSE) +
+  xlab("") + ylab("") + theme_bw() + 
+  theme(legend.position =  "none", 
+        legend.title = element_text(color = 'black', size = 16),
+        legend.text = element_text(size = 16), 
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 16), 
+        axis.text = element_text(size = 16)) +
+  scale_x_continuous(breaks = c(-145,-140,-135,-130,-125))
+
+map.bc
+```
+
+All bioregions
+```{r, fig.width=10, fig.height=7}
+g <- map.bc +
+  geom_point(data = zoopmeta, 
+             aes(x = Longitude, y = Latitude, colour = Bioregion), 
+            size = 2, alpha = 0.7) +
+  scale_color_manual(values = clrs.bioregion)
+
+g
+# png(here::here("Figures/Bioregionalization_map_points.png"),
+#     width = 10, height = 7, units = "in", res = 600)
+# g
+# dev.off()
+```
+
+
+```{r, fig.width=11, fig.height=7}
+g1 <- map.bc +
+  geom_point(data = filter(zoopmeta, Bioregion %in% c("Offshore")), 
+             aes(x = Longitude, y = Latitude, colour = Bioregion), 
+            size = 3, alpha = 0.7, shape = 18) +
+  geom_point(data = filter(zoopmeta, Bioregion %in% c("Nearshore")), 
+             aes(x = Longitude, y = Latitude, colour = Bioregion), 
+            size = 2, alpha = 0.7, shape = 16) +
+  scale_color_manual(values = clrs.bioregion[c(3,1)])
+
+g2 <- map.bc +
+  geom_point(data = filter(zoopmeta, Bioregion %in% c("DeepShelf")), 
+             aes(x = Longitude, y = Latitude, colour = Bioregion), 
+            size = 3, alpha = 0.7, shape = 18) +
+  geom_point(data = filter(zoopmeta, Bioregion %in% c("DeepFjord")), 
+             aes(x = Longitude, y = Latitude, colour = Bioregion), 
+            size = 2, alpha = 0.7, shape = 16) +
+  scale_color_manual(values = clrs.bioregion[c(4,2)]) +
+  coord_sf(xlim = c(-136, -122), ylim = c(47, 56.1), expand = FALSE) +
+  theme(axis.text.y = element_blank())
+
+g1
+g2
+
+# png(here::here("Figures/Bioregionalization_map_points_A.png"),
+#     width = 10, height = 7, units = "in", res = 600)
+# print(g1)
+# dev.off()
+# 
+# png(here::here("Figures/Bioregionalization_map_points_B.png"),
+#     width = 10, height = 7, units = "in", res = 600)
+# print(g2)
+# dev.off()
+
+# width of map1 = 23.25, map2 = 14, proportion = 1.66:1
+# png(here::here("Figures/Bioregionalization_map_points_AB.png"),
+#     width = 11, height = 7, units = "in", res = 900)
+# plot_grid(g1,g2, align = "h", axis = "bl", ncol = 2, rel_widths = c(1.66,1))
+# dev.off()
+```
+
+
+Grid according to most commonly represent bioregion.
+```{r, fig.width=10, fig.height=7}
+res <- 0.25
+lon_grid <- seq(-145.25,-122,res)
+lat_grid <- seq(47, 56, res)
+
+bioregions.gridded <- zoopmeta %>% 
+  dplyr::select(Key,Bioregion,Longitude,Latitude) %>% 
+  mutate(lon_bin = lon_grid[ .bincode(Longitude, breaks = lon_grid) ], 
+         lat_bin = lat_grid[ .bincode(Latitude, breaks = lat_grid) ]) %>% 
+  group_by(Bioregion, lon_bin, lat_bin) %>% 
+  summarise(n = n()) %>% 
+  group_by(lon_bin, lat_bin) %>% 
+  top_n(n=1) %>% 
+  arrange(Bioregion)
+
+# duplicated grid points
+bioregions.gridded$isdistinct <- duplicated(dplyr::select(bioregions.gridded, lon_bin, lat_bin))
+
+# Create triangle polygons for the duplicated grid cells
+dups <- bioregions.gridded %>% 
+  ungroup() %>% 
+  filter(isdistinct == TRUE) %>% 
+  rownames_to_column(var = "index") %>% 
+  mutate(x1 = lon_bin, x2 = lon_bin+res, x3 = lon_bin+res,
+         y1 = lat_bin, y2 = lat_bin, y3 = lat_bin+res) %>% 
+  dplyr::select(-c(isdistinct,n,lon_bin,lat_bin))
+A <- dplyr::select( pivot_longer(dplyr::select(dups, index, Bioregion, x1, x2, x3), 
+                          cols = c(x1, x2, x3), names_to = "x.edge", values_to = "x"),
+             -x.edge)
+B <- dplyr::select( pivot_longer(dplyr::select(dups, index, Bioregion, y1, y2, y3), 
+                          cols = c(y1, y2, y3), names_to = "y.edge", values_to = "y"), 
+             -y.edge)
+dups <- cbind(A,y = B$y)
+rm(A, B)
+
+
+g <- map.bc +
+  geom_tile(data = filter(bioregions.gridded, isdistinct == FALSE),
+            aes(x=lon_bin+(res/2), y = lat_bin+(res/2),
+                width = res, height = res, fill=Bioregion),
+            alpha = 0.8) +
+  geom_polygon(data = dups, aes(x = x, y = y, group = index, fill=Bioregion)) +
+  scale_fill_manual(values = clrs.bioregion) + 
+  geom_contour(data = bathy, aes(x=x, y=y, z=z), 
+               breaks=c(-100,-200, -500,-1000), size=c(0.2), colour="black") 
+
+g
+# png(here::here("Figures/Bioregionalization_map_gridded.png"),
+#     width = 10, height = 7, units = "in", res = 600)
+# g
+# dev.off()
+
+```
+
+
+

@@ -1,0 +1,186 @@
+---
+title: "Merge_environmental_data"
+author: "Patrick Pata"
+date: "18/10/2021"
+output: html_document
+---
+
+This file loads the environmental data from CTD, bottle, satellite, and climate indices calculated from Matlab code processing the CIOOS and Globcolour data. The matlab codes for these are in the Supp_Documents folder.
+
+The environmental data are then merged with netmetadata dataframe extracted here. The variables that would be used in the analysis later on are selected and renamed. Phytoplankton size classes based on the Zeng et al. (2018) methodology are calculated from the satellite chlorophyll data.
+
+Notes on the environmental data:
+1. ENSO index is based on the Nino3.4 index.
+2. Satellite climatology is the monthly average from Sep 1997 to Aug 2020.
+3. Satellite-derived variables uses monthly values when available (~>80% of samples) and the climatology when not.
+4. "Surface" ctd and bottle is set as the 0-50m integrated average.
+5. CTD and Bottle data were first binned to 1 m depth bins and then integrated by averaging across the net tow depth.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load files and libraries
+```{r}
+library(tidyverse)
+library(readxl)
+library(here)
+`%notin%` <- Negate(`%in%`)
+source(here::here("Functions/p_chla_SCFT.R"))
+
+load(here::here("Data_Output/zoop_curated_taxa_10252021.RData"))
+
+keylist <- readxl::read_excel(here::here("Data_Raw/net_ctd_bot_keys_10192021.xlsx"))
+
+ctdtypes <- c("text",rep("numeric",31))
+ctd <- readxl::read_excel(here::here("Data_Raw/ctdnet_integrated_mld_10192021.xlsx"),
+                          col_names = TRUE, col_types = ctdtypes)
+bottle <- readxl::read_excel(here::here("Data_Raw/bottlenet_integrated_mld_10192021.xlsx"))
+climsat <- readxl::read_excel(here::here("Data_Raw/net_climate_satellite_10192021.xlsx"))
+
+```
+
+# Create net metadata dataframe
+Variables *Raw are  the diversity values from the downloaded zooplankton dataset. These should be recalculated for the curated taxonomy.
+```{r}
+zoopmeta <- zoop_sub %>% 
+  select(Key,DateTime,Longitude,Latitude,
+         Year,Month,Day,Time,
+         Region,Station,Project,Twilight,
+         Tow.Depth, Bottom.Depth, Volume.Filtered.m3, Tow.Ratio,
+         Net.Type, Net.Mouth, Mesh.Size,
+         StnDivRaw = Station_Diversity, StnEqRaw = Station_Equitability, 
+         NSpRaw = Num_Species) %>% 
+  group_by_all() %>% 
+  summarise(NspstgRaw = n()) %>%  # useful to identify samples with very low counts
+  arrange(as.character(Key)) %>% 
+  ungroup()
+
+```
+
+# Select and rename the CTD and bottle data 
+```{r}
+# Add the matching net keys to the ctd keys
+ctd.sub <- ctd %>% 
+  left_join(keylist, by = "CTDKey") %>% 
+  select(Key = NetKey,  MLD = MLD003,
+         Temp.surf = TempI50, Temp.net = TempINet,
+         Sali.surf = SaliI50, Sali.net = SaliINet,
+         Oxyg.surf = OxygI50, Oxyg.net = OxygINet,
+         Dens.surf = DensI50, Dens.net = DensINet,
+         Spice.surf = SpiceI50, Spice.net = SpiceINet,
+         N2V2.030 = N2V2I30, N2V2.surf = N2V2I50, N2V2.net = N2V2INet,
+         CoverageTS, CoverageOxy)
+
+bottle.sub <- bottle %>% 
+  left_join(keylist, by = "BottleKey") %>% 
+  select(Key = NetKey,
+         Nitr.surf = NitrI50, Nitr.net = NitrINet,
+         Phos.surf = PhosI50, Phos.net = PhosINet,
+         Sili.surf = SiliI50, Sili.net = SiliINet,
+         CoverageN, CoverageP, CoverageSi)
+```
+
+
+
+# Rename satellite data variables
+```{r}
+climsat <- climsat %>% 
+  rename(Chla = ACRI_CHL_GSM, PAR = ACRI_PAR, 
+         ZEU = ACRI_ZEU, BB443 = ACRI_BB443,
+         POC = ACRI_POC, PIC = ACRI_PIC,
+         Chla.clim = ACRI_CHL_GSM_clim, PAR.clim = ACRI_PAR_clim, 
+         ZEU.clim = ACRI_ZEU_clim, BB443.clim = ACRI_BB443_clim,
+         POC.clim = ACRI_POC_clim, PIC.clim = ACRI_PIC_clim) %>% 
+  select(-c(ACRI_CHL_AV,ACRI_CHL_AV_clim))
+```
+
+Assess the correlation between the monthly satellite values and the climatological (Sep 1997 - Aug 2020) values for instances when both are available.
+```{r, eval=FALSE}
+sat <- climsat[,8:19]
+satellite.eval <- tibble(Variable = character(), n = numeric(), 
+                         n.clim = numeric(), correlation = numeric())
+for (i in 1:6) {
+  sat.sub <- sat[,c(i,i+6)]
+  satellite.eval[i,]$Variable <- colnames(sat.sub)[1]
+  satellite.eval[i,]$n <- sum(!is.na(sat.sub[,1]))
+  satellite.eval[i,]$n.clim <- sum(!is.na(sat.sub[,2]))
+  r <- cor(sat.sub, use = "complete.obs")
+  satellite.eval[i,]$correlation <- r[1,2]
+}
+satellite.eval <- mutate(satellite.eval,
+                         percentage = (n/n.clim)*100)
+
+print(satellite.eval)
+```
+
+
+Supply the climatological values when the month-year value of the satellite data is not available
+```{r}
+ii <- which(is.na(climsat$Chla) & !is.na(climsat$Chla.clim) )
+climsat$Chla[ii] <- climsat$Chla.clim[ii]
+
+ii <- which(is.na(climsat$PAR) & !is.na(climsat$PAR.clim) )
+climsat$PAR[ii] <- climsat$PAR.clim[ii]
+
+ii <- which(is.na(climsat$ZEU) & !is.na(climsat$ZEU.clim) )
+climsat$ZEU[ii] <- climsat$ZEU.clim[ii]
+
+ii <- which(is.na(climsat$BB443) & !is.na(climsat$BB443.clim) )
+climsat$BB443[ii] <- climsat$BB443.clim[ii]
+
+ii <- which(is.na(climsat$POC) & !is.na(climsat$POC.clim) )
+climsat$POC[ii] <- climsat$POC.clim[ii]
+
+ii <- which(is.na(climsat$PIC) & !is.na(climsat$PIC.clim) )
+climsat$PIC[ii] <- climsat$PIC.clim[ii]
+```
+
+
+Calculate plankton size classes from chlorophyll-a values
+```{r}
+# Convert bb443 (m-1) to Cphyto(ug L-1): Cphyto = bb443 * 12129 + 0.67 (Burt et al. 2018)
+climsat$Cphyto = climsat$BB443 * 12129 + 0.67
+
+# Calculate phytoplankton size classes and functional types from chlorophyll-a 
+chla <- p_chla_SCFT(climsat$Chla,2)
+PSC <- chla$PSC.chla
+row.names(PSC) <- rownames(climsat)
+PFT <- chla$PFT.chla
+row.names(PFT) <- rownames(climsat)
+
+# Add calculated information
+climsat <- climsat %>% cbind(PSC) %>% cbind(PFT)
+
+climsat.sub <- climsat %>% 
+  select(Key, DayOfYear, NPGO, PDO, ENSO, NPI,
+         Chla, PAR, ZEU, BB443, POC, PIC,
+         pico, nano, micro)
+```
+
+
+# Merge ctd, bottle, climate, satellite, PSC to zoopenvi
+```{r}
+zoopenvi <- zoopmeta %>% 
+  dplyr::select(Key, DateTime, Longitude, Latitude,Twilight,
+                Tow.Depth, Bottom.Depth, Volume.Filtered.m3, Tow.Ratio,
+                Net.Type, Net.Mouth, Mesh.Size) %>% 
+  left_join(ctd.sub, by = "Key") %>% 
+  left_join(bottle.sub, by = "Key") %>% 
+  left_join(climsat.sub, by = "Key") %>% 
+  remove_rownames() %>% 
+  mutate("Key2" = Key) %>% 
+  column_to_rownames(var="Key2")
+
+```
+
+# Save to data output
+```{r}
+rm(list= ls()[!(ls() %in% c('zoop_sub','taxalist','zoopmeta','zoopenvi'))])
+
+save("zoopmeta","zoopenvi",
+     file=here::here("Data_Output/zoop_net_metadata_environmental_variables_10202021.RData"))
+```
+
+
+

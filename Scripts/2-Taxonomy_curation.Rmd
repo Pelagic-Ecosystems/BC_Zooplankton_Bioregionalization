@@ -1,0 +1,150 @@
+---
+title: "Taxonomy_curation"
+author: "Patrick Pata"
+date: "18/10/2021"
+output: html_document
+---
+
+This file loads the curated zooplankton dataset and extract the original taxonomic information. This will be manually curated in a spreadsheet. The curated spreadsheet is then loaded back for merging with the zooplankton dataset. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load files and libraries
+```{r}
+library(tidyverse)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_curated_10202021.RData"))
+theme_set(theme_bw())
+```
+
+# 1. Create species list for taxonomic curation
+```{r, eval=FALSE}
+taxa <- zoop_sub %>% 
+  dplyr::select(Name, Phylum, Class, Order, Family, Genus, Species, Stage)
+taxalist <- taxa %>% 
+  unique()
+
+# number of samples 
+n1 <- length(unique(zoop_sub$Key))
+n2 <- length(unique(filter(zoop_sub,Month >= 4 & Month <= 10)$Key))
+
+# Count the number of samples a taxa was recorded for the entire dataset and also for the April-October period
+A <- zoop_sub %>% 
+  select(Key,Name) %>% unique() %>% count(Name) %>% 
+  mutate(Name.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Name) %>%  unique() %>% count(Name) %>% 
+  mutate(Name.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+A <- zoop_sub %>% 
+  select(Key,Phylum) %>% unique() %>% count(Phylum) %>% 
+  mutate(Phylum.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Phylum) %>%  unique() %>% count(Phylum) %>% 
+  mutate(Phylum.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+A <- zoop_sub %>% 
+  select(Key,Class) %>% unique() %>% count(Class) %>% 
+  mutate(Class.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Class) %>%  unique() %>% count(Class) %>% 
+  mutate(Class.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+A <- zoop_sub %>% 
+  select(Key,Order) %>% unique() %>% count(Order) %>% 
+  mutate(Order.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Order) %>%  unique() %>% count(Order) %>% 
+  mutate(Order.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+A <- zoop_sub %>% 
+  select(Key,Family) %>% unique() %>% count(Family) %>% 
+  mutate(Family.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Family) %>%  unique() %>% count(Family) %>% 
+  mutate(Family.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+A <- zoop_sub %>% 
+  select(Key,Genus) %>% unique() %>% count(Genus) %>% 
+  mutate(Genus.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Genus) %>%  unique() %>% count(Genus) %>% 
+  mutate(Genus.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+A <- zoop_sub %>% 
+  select(Key,Species) %>% unique() %>% count(Species) %>% 
+  mutate(Species.Perc = floor(n/n1*10000)/100) %>% select(-n)
+B <- zoop_sub %>% filter(Month >= 4 & Month <= 10) %>% 
+  select(Key,Species) %>%  unique() %>% count(Species) %>% 
+  mutate(Species.PercAO = floor(n/n2*10000)/100) %>% select(-n)
+AB <- left_join(A,B)
+taxalist <- left_join(taxalist, AB)
+
+# Adjust order of columns
+taxalist <- taxalist[,c(1,9,10,2,11,12,3,13,14,4,15,16,5,17,18,6,19,20,7,21,22,8)]
+colnames(taxalist)
+
+# Save to csv file for curation
+# write.csv(taxalist, file = here::here("Data_Output/taxalist_10202021_unedited.csv"), row.names = FALSE)
+```
+
+
+# 2. Load and merge the updated taxalist to the zoop dataset
+After this chunk, move to the next steps in the analysis. The updated data and taxalist is saved in the Data_Output folder.
+
+The codes below are data exploration for the curated dataset.
+```{r}
+taxalist <- read.csv(here::here("Data_Raw/taxalist_curated_10252021.csv")) %>% 
+  as_tibble() %>% 
+  rename(Taxa.Name = "Updated.Name.2021",
+         Taxa.Level = "Taxa.Level.2021",
+         Taxa.Flag = "Flag.2021")
+
+# Add taxa names if analyzed at Genus or Family level
+# When analyzing at G/F level, update the flag and genus. Flag the taxa as 5 for instances when these were not analyzed at the species level but can be included when at the genus or family level.
+taxalist <- taxalist %>% 
+  mutate(Taxa.Name.Genus = Taxa.Name, 
+         Taxa.Level.Genus = Taxa.Level, Taxa.Flag.Genus = Taxa.Flag,
+         Taxa.Name.Family = Taxa.Name, 
+         Taxa.Level.Family = Taxa.Level, Taxa.Flag.Family = Taxa.Flag)
+# Genus level
+ii <- which(taxalist$Taxa.Level == "S")
+taxalist$Taxa.Name.Genus[ii] <- taxalist$Genus[ii]
+taxalist$Taxa.Level.Genus[ii] <- "G"
+jj <- which(taxalist$Taxa.Level == "S" & 
+              (taxalist$Taxa.Flag == 2 | taxalist$Taxa.Flag == 3) )
+taxalist$Taxa.Flag.Genus[jj] = 5
+
+# Family level
+ii <- which(taxalist$Taxa.Level %in% c("S","G"))
+taxalist$Taxa.Name.Family[ii] <- taxalist$Family[ii]
+taxalist$Taxa.Level.Family[ii] <- "F"
+jj <- which(taxalist$Taxa.Level %in% c("S","G") & 
+              (taxalist$Taxa.Flag == 2 | taxalist$Taxa.Flag == 3) )
+taxalist$Taxa.Flag.Family[jj] = 5
+
+zoop_sub <- zoop_sub %>% 
+  left_join(dplyr::select(taxalist, Name, Taxa.Name, Taxa.Level,
+                          Taxa.Flag, Major.Group,
+                          Taxa.Name.Genus, Taxa.Level.Genus, Taxa.Flag.Genus,
+                          Taxa.Name.Family, Taxa.Level.Family, Taxa.Flag.Family))
+
+save("zoop_sub", "taxalist", file=here::here("Data_Output/zoop_curated_taxa_10252021.RData"))
+```
+

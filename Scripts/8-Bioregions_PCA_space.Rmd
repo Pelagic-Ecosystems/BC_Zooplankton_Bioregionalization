@@ -1,0 +1,108 @@
+---
+title: "Bioregion_PCA_space"
+author: "Patrick Pata"
+date: "24/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(cowplot)
+library(here)
+`%notin%` <- Negate(`%in%`)
+source(here::here("Functions/p_biplot_pca.R"))
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+```
+
+# Calculate PCA
+The rda() function calculates the PCA when a constraining matrix it not provided. The PCA results are stored in the CA list.
+```{r}
+pca.zoop <- rda(zoop.logchord)
+
+# Variance explained
+head(round( pca.zoop$CA$eig/pca.zoop$tot.chi*100, digits = 1) )
+
+```
+
+The first 4 PCA axes. 
+```{r}
+p_biplot_pca(rdaoutput = pca.zoop, 
+             cluster = zoopmeta$Bioregion,
+             axestoplot = c(1,2),
+             alpha = 0.6, legendtitle = "Bioregion",
+             clrs = clrs.bioregion)
+
+p_biplot_pca(rdaoutput = pca.zoop, 
+             cluster = zoopmeta$Bioregion,
+             axestoplot = c(3,4),
+             alpha = 0.6, legendtitle = "Bioregion",
+             clrs = clrs.bioregion)
+```
+
+# Subset environmental data for biplot
+The variables are manually selected here based on which were significant from a previous RDA analysis.
+```{r, fig.height = 6, fig.width = 12}
+# Remove CTD records that are not representative of the water column
+zoopenvi2 <- zoopenvi %>% 
+  mutate(TScov = CoverageTS/Tow.Depth) 
+ii <- which(zoopenvi2$Temp.surf >= 0 & zoopenvi2$TScov < 0.5 & zoopenvi2$CoverageTS < 50)
+zoopenvi2[ii,]$Temp.net <- NA
+zoopenvi2[ii,]$Sali.net <- NA
+zoopenvi2[ii,]$N2V2.030 <- NA
+
+
+envi.axes12 <- zoopenvi2 %>% 
+  dplyr::select(Temperature = "Temp.net", Salinity = "Sali.net",
+         `Bottom Depth` = "Bottom.Depth", Picoplankton = "pico",
+         Nanoplankton = "nano", Microplankton = "micro",
+         Stratification = "N2V2.030")
+envi.axes34 <- zoopenvi2 %>% 
+  left_join(dplyr::select(zoopmeta,Key,Year)) %>% 
+  dplyr::select(Temperature = "Temp.net", Day = DayOfYear,
+         "Year", "PDO", "NPGO", "ENSO", "PAR")
+
+g1 <- p_biplot_pca(rdaoutput = pca.zoop, 
+             xmat = envi.axes12,
+             cluster = zoopmeta$Bioregion,
+             axestoplot = c(1,2),
+             alpha = 0.4, legendtitle = "Bioregion",
+             clrs = clrs.bioregion, plottitle = "A")
+g1 <- g1 +
+  theme(legend.position =  "none", 
+        legend.title = element_text(color = 'black', size = 16),
+        legend.text = element_text(size = 16), 
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 16), 
+        axis.text = element_text(size = 16))+
+  coord_equal()
+
+g2 <- p_biplot_pca(rdaoutput = pca.zoop, 
+             xmat = envi.axes34,
+             cluster = zoopmeta$Bioregion,
+             axestoplot = c(3,4),
+             alpha = 0.4, legendtitle = "Bioregion",
+             clrs = clrs.bioregion, plottitle = "B")
+g2 <- g2 +
+  theme(legend.position =  "none", 
+        legend.title = element_text(color = 'black', size = 16),
+        legend.text = element_text(size = 16), 
+        plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 16), 
+        axis.text = element_text(size = 16))+
+  coord_equal()
+
+
+# pdf(here::here("Figures/PCA_bioregions_01112022.pdf"), width = 12, height = 6) #, units = "in", res = 600)
+plot_grid(g1,g2, ncol = 2)
+# dev.off()
+```
+

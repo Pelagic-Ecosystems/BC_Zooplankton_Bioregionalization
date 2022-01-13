@@ -1,0 +1,229 @@
+---
+title: "Zooplankton_data_preparation"
+author: "Patrick Pata"
+date: "15/10/2021"
+output: html_document
+---
+
+The analysis begins with loading the concatenated csv files from the DFO zooplankton database. The dataset is then curated to produce the .RData file for analysis. A taxonomy file is then created which will be used to curate the taxonomic classifications by coarsening some groups and identifying taxa that would be excluded from the analysis.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data loading
+Load the data and necessary libraries
+```{r}
+library(tidyverse)
+library(lubridate)
+library(marmap)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+# Load the data
+zoop <-  read_csv(here::here("Data_Raw/Zoop_BC_08122020_clean.csv"), col_types = "fffffffffffffffnnnnnnnnnnnnnnnnnnn" ) # This is the concatenated DFO csv files without notes column
+zoop <-  as_tibble(zoop)
+
+# Count unique keys
+str(zoop$Key) # should give 9949 levels
+str(zoop$Species) # 1013 keys
+
+# List the variables in the document
+colnames(zoop)
+```
+
+Update the date variable
+```{r}
+# create date time 
+hr <- floor(zoop$Time * 24)
+mn <- floor( ( (zoop$Time * 24) - hr ) * 60 ) 
+sc <- ( ( (zoop$Time * 24) - hr ) * 60 )%%1 * 60 
+zoop <- zoop %>%  
+  mutate( dtsample = lubridate::make_datetime(Year, Month, Day,
+                                   hr, mn,  tz="Canada/Pacific") )
+
+# Check date variable
+head(date(zoop$dtsample))
+
+rm(hr, mn, sc)
+```
+
+Correct instances when bottom depth is NA. Use values identified from Gebco depth. GEBCO data has a 15-arc-second resolution (~ 450m) so it may not be accurate especially for steep slopes, nearshore, and seamounts.
+
+Attribution for the 2021 grid is: "GEBCO Compilation Group (2021) GEBCO 2021 Grid (doi:10.5285/c6612cbe-50b3-0cff-e053-6c86abc09f8f)"
+```{r}
+# Add bathymetry data from GEBCO. This will take a while to run.
+bathy <- readGEBCO.bathy(file = here::here("Data_Raw/gebco_2021_n63.0_s40.0_w-170.0_e-120.0.nc"))
+zoop <- zoop %>% 
+  mutate(Depth_Gebco = (get.depth(bathy, zoop$Longitude, zoop$Latitude, 
+                                  locator = FALSE )$depth) * -1 )
+rm(bathy)
+
+# This is only for 2 samples
+ii <- which(is.na(zoop$`Depth_Bottom(m)`))
+unique(zoop[ii,]$Key)
+zoop[ii,]$`Depth_Bottom(m)` <- zoop[ii,]$Depth_Gebco
+
+```
+
+
+Calculate tow depth-bottom depth ratio
+```{r}
+zoop <- zoop %>% 
+  mutate(Tow.Ratio = Depth_Start/`Depth_Bottom(m)`)
+
+# When Tow depth > bottom depth, correct this by setting the bottom depth based on the tow depth. Using the GEBCO depth is too coarse and does not solve the problem, so set bottom_depth = tow_depth.
+ii <- which(zoop$Tow.Ratio > 1)
+
+zoop[ii,]$`Depth_Bottom(m)` <- zoop[ii,]$Depth_Start
+zoop[ii,]$Tow.Ratio <- 1
+
+hist(zoop$Tow.Ratio)
+
+rm(ii)
+```
+
+
+Set the geographic and year limits
+```{r}
+lonlim = c(-145.1, -122) # -0.1 to account for a few Line P samples outside limits
+latlim = c(47, 56)
+yearlim = c(1995,2014)
+```
+
+
+# Data Curation
+1. Remove Citizen Science program (this is incidentally removed by lon-lat-year filter)
+2. Remove Pacific Herring Group ONH and Pacific Salmon Society SCOR VNH
+3. Remove PBS 1986-87 'Not Defined' PI with low taxonomic specificity
+4. Remove <200 um mesh size and MPS nets (open-closing, not full water column)
+```{r}
+zoop_sub <- zoop %>% 
+  filter(Longitude >= lonlim[1] & Longitude <= lonlim[2] &
+           Latitude >= latlim[1] & Latitude <= latlim[2] &
+           Year >= yearlim[1] & Year <= yearlim[2]) %>% 
+  filter(str_detect(Project, "Citizen Science")==FALSE) %>% 
+  filter(str_detect(PI, "Pacific Herring Grp")==FALSE) %>% 
+  filter(str_detect(PI, "Salmon Coast Society")==FALSE) %>% 
+  filter(str_detect(PI, "Not Defined")==FALSE) %>% 
+  filter(str_detect(Net_Type,"MPS VNH")==FALSE & `Mesh_Size(um)` >= 200) %>% 
+  droplevels() 
+
+# Count unique keys
+zoop_sub <- zoop_sub %>% droplevels()
+str(zoop_sub$Key)
+str(zoop_sub$Species) 
+```
+
+5. Remove data of shallow tows collected during the same station and date. These were instances when multiple tows were collected from the same station, but are not multiple open-closing nets. Likely done to capture vertical layers of the zoop community.
+```{r}
+# 1. Filter repeating stations with a shallow and deep tow
+red <- zoop_sub %>%
+  dplyr::select(Key,Station,Project,Depth_Start,`Depth_Bottom(m)`,Tow.Ratio,
+                Longitude,Latitude,Day,Month,Year,dtsample) %>% 
+  unique
+
+# 2. Find instances of same date (Year-Month-Day), station, region with large differences in tow depths and then select the deepest tows. The SD filter is a quick way to identify large differences in tow depths and was manually tuned.
+red2 <- red %>% 
+  group_by(Station,Project,Year, Month, Day) %>% 
+  summarise(n = n(), sd = sd(Depth_Start)) %>% 
+  dplyr::filter(n >= 2 & sd >= 20) %>% 
+  left_join(red, by = c("Station","Project","Day","Month","Year")) 
+red3 <- red2 %>% 
+  group_by(Station,Project,Year, Month, Day) %>% 
+  dplyr::slice_max(n = 1, order_by = Tow.Ratio)
+
+# 3. Identify keys of samples to exclude (i.e. red2 but not in red3)
+redx <- red2$Key[ red2$Key %notin% red3$Key ] %>% droplevels()
+zoop_sub <- zoop_sub %>% 
+  dplyr::filter(Key %notin% redx) %>% 
+  droplevels()
+
+str(zoop_sub$Key) # 5106
+str(zoop_sub$Species) 
+rm(red, red2, red3, redx)
+```
+
+6. Remove repeat station samples.
+Not all have intercal as project name. Select highest species richness* and for 2 instances when sp richness is equal, randomly select one. Included in these are instances when different net tow methods were used, thus higher species richness is preferred. The samples to exclude are in "intercal.x".
+```{r}
+red <- zoop_sub %>%
+  dplyr::select(Key,Station,Project,Depth_Start,`Depth_Bottom(m)`,Tow.Ratio,
+                Longitude,Latitude,Day,Month,Year,dtsample, Num_Species) %>% 
+  unique
+
+intercal <- (red) %>% 
+  group_by(Station,Project,Year, Month, Day) %>% 
+  summarise(n = n()) %>% 
+  dplyr::filter(n >= 2) %>% 
+  left_join(red, by = c("Station","Project","Day","Month","Year")) 
+
+set.seed(888)
+intercal.retain <- intercal %>% 
+  group_by(Station,Project,Year, Month, Day) %>% 
+  top_n(1, wt = Num_Species) %>% 
+  group_by(Station,Project,Year, Month, Day) %>% 
+  sample_n(1)
+
+# List all repeat station-date to remove
+intercal.x <- intercal$Key[ intercal$Key %notin% intercal.retain$Key ]
+
+# Remove repeated stations
+zoop_sub <- zoop_sub %>% 
+  dplyr::filter(Key %notin% intercal.x) %>% 
+  droplevels()
+
+str(zoop_sub$Key) # 4790
+str(zoop_sub$Species) 
+
+rm(red, intercal, intercal.retain)
+```
+
+7. Remove low tow ratios in shallow waters
+Based on project discussion on April 2021, various tow ratio thresholds were explored and the group decided to remove samples with Tow.Ratio < 70% of bottom depth when tow depth was < 100 m. 
+
+Note that instances of low tow ratios when the tow depth are ~150m and ~250m.
+```{r}
+red <- zoop_sub %>%
+  dplyr::select(Key,Station,Project,Depth_Start,`Depth_Bottom(m)`,Tow.Ratio,
+                Longitude,Latitude,Day,Month,Year,dtsample, Num_Species) %>% 
+  unique
+
+# Visualize the removal
+ggplot(data = red, aes(x = Tow.Ratio, y = Depth_Start, 
+                        color = log10(`Depth_Bottom(m)`)) ) +
+  geom_point(size = 2, shape = 16, alpha = 0.5) +
+  xlim(0,1) +  ggtitle("All data")
+
+ii <- which(red$Tow.Ratio < 0.7 & red$Depth_Start < 100)
+ggplot(data = red[-ii,], aes(x = Tow.Ratio, y = Depth_Start, 
+                             color = log10(`Depth_Bottom(m)`)) ) +
+    geom_point(size = 2, shape = 16, alpha = 0.5) +
+  xlim(0,1) + 
+  ggtitle("Exclude Tow Ratio < 0.7 & Tow Depth < 100")
+
+# rm.3 <- which(red$Tow.Ratio < 0.7 & red$Depth_Start <= 115)
+
+# Exclude samples
+zoop_sub <- zoop_sub %>% 
+  dplyr::filter(!(Tow.Ratio < 0.7 & Depth_Start < 100)) %>% 
+  droplevels()
+
+str(zoop_sub$Key)
+str(zoop_sub$Species) 
+```
+
+# Output .RData file of the subset zooplankton data with revised column names for some variables. This will be file loaded in the next codes.
+```{r}
+zoop_sub <- zoop_sub %>% 
+  rename(Tow.Depth = Depth_Start, Bottom.Depth = `Depth_Bottom(m)`,
+         Net.Mouth = `Net_Mouth(m)`, Net.Type = Net_Type,
+         Mesh.Size = `Mesh_Size(um)`, Volume.Filtered.m3 = `Volume_Filtered(m3)`,
+         Abundance.m3 = `Abundance(#/m3)`, Biomass.mg.m3 = `Biomass(mg/m3)`,
+         DateTime = dtsample) %>% 
+  select(-Depth_End)
+
+colnames(zoop_sub)
+
+save("zoop_sub", file=here::here("Data_Output/zoop_curated_10202021.RData"))
+```

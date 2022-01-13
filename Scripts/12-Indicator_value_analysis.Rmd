@@ -1,0 +1,126 @@
+---
+title: "Indicator_value_analysis"
+author: "Patrick Pata"
+date: "27/10/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load files and libraries
+```{r}
+library(tidyverse)
+library(vegan)
+library(adespatial)
+library(ggrepel)
+library(tictoc)
+library(labdsv)
+library(here)
+`%notin%` <- Negate(`%in%`)
+
+load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
+
+source(here::here("Functions/p_indvalScatter_25.R"))
+```
+
+Calculate IndVal using the Dufrene-Legendre method in labdsv package. 
+Calculate the indicator value from the untransformed species abundance table although the results of this calculated on the log-transformed abundance is very similar (r ~ 0.95).
+```{r, fig.width=10, fig.height=8}
+indval.zoop <- indval(zoop_abundance, zoopmeta$Bioregion,
+                      numitr=10000)
+# indval.zoop <- indval(zoop.log, zoopmeta$Bioregion,
+#                       numitr=10000)
+
+summary(indval.zoop, p=0.05, type='short', digits=2, show=p,
+          sort=FALSE, too.many=100)
+
+sigsp25 <- p_indvalScatter_25(indval.zoop, plot = TRUE)
+```
+
+
+# Extract the indval table and the A and B components 
+(A: Specificity/RelAbu x B: Fidelity/RelFrq)
+```{r}
+indval.zoop.bioregions <- data.frame(cluster = indval.zoop$maxcls, 
+                                     indval = indval.zoop$indcls*100, 
+                                     pval = indval.zoop$pval,
+                                     padj = p.adjust(indval.zoop$pval, "holm")) %>% 
+  rownames_to_column("Species") %>% 
+  mutate(Bioregion = levels(bioregions$Bioregion)[cluster])
+  
+indval.zoop.AB <- data.frame(indval = indval.zoop$indval,
+                              relabu = indval.zoop$relabu,
+                             relfrq = indval.zoop$relfrq) %>% 
+  bind_cols(dplyr::select(indval.zoop.bioregions, Species, Bioregion))
+```
+
+# Save indval results for relating with species associations.
+```{r, eval =FALSE}
+save(file = here::here(paste0("Data_Output/Indicator_values_11022021.RData")),
+list = c("indval.zoop.bioregions","indval.zoop.AB"))
+```
+
+
+# NMDS of indicator value analysis results
+```{r, fig.height=11, fig.width=11}
+indval.nmds <- metaMDS(indval.zoop.AB[,c(5:12)])
+(indval.nmds)
+stressplot(indval.nmds)
+plot(indval.nmds, display = c("sites","species", choices = c(1,2)) )
+points(indval.nmds, display = c("sites", "species"),
+    choices = c(1,2)) 
+
+# NMDS scores for biplot
+indval.nmds.scores <- as.data.frame( scores(indval.nmds) ) %>% 
+  rownames_to_column("Species") %>% 
+  left_join(indval.zoop.bioregions) %>% 
+  mutate(Bioregion = as.factor(Bioregion))
+indval.nmds.scores$Bioregion <- fct_relevel(indval.nmds.scores$Bioregion, 
+                                            levels = c("Offshore","DeepShelf",
+                                                       "Nearshore","DeepFjord"))
+
+# Add to biplot the A & B components per cluster
+AB.fit <- envfit(indval.nmds, indval.zoop.AB[,c(5:12)], 
+                 permutations = 1000, strata = NULL,  choices=c(1,2), na.rm = TRUE)
+AB.vec <- AB.fit$vectors$arrows * sqrt(AB.fit$vectors$r)
+AB.vec <- as_tibble(AB.vec) %>%  
+  mutate(labs = c("SPC-OS","SPC-DS","SPC-NS","SPC-DF",
+                  "FID-OS","FID-DS","FID-NS","FID-DF") )
+
+
+ggplot(indval.nmds.scores, 
+       aes(x = NMDS1, y = NMDS2, color = Bioregion)) +
+  geom_point() +
+  scale_color_manual(values = clrs.bioregion) +
+  theme_bw() +
+  geom_text_repel(data = filter(indval.nmds.scores, indval >= 25, padj < 0.05),
+                  aes(x = NMDS1, y = NMDS2, label = Species), fontface = "italic",
+                  size = 4, 
+                  max.overlaps = 21) +
+  geom_segment(data = AB.vec, aes(x = rep(0,nrow(AB.vec)), y =rep(0,nrow(AB.vec)), 
+                              xend = NMDS1,yend = NMDS2), 
+               lineend = "round", size = 1, colour = "black") +
+    geom_text_repel(data = AB.vec, aes(x = NMDS1, y = NMDS2, label=labs), 
+                  color="black", fontface = 'bold', size = 6) +
+  theme(legend.position = "none")
+```
+
+Alternative indval method using the indicspecies package of De Caceres.
+```{r, eval = FALSE}
+# library(indicspecies) # alternative to indval package
+
+indspe.zoop <- multipatt(zoop_abundance, zoopmeta$Bioregion, duleg = TRUE)
+
+indspe.zoop.table <- cbind(indval = as.data.frame(indspe.zoop$str ^ 2) * 100, 
+              A = indspe.zoop$A* 100, B = indspe.zoop$B* 100,
+              clust = indspe.zoop$sign$index, iv = (indspe.zoop$sign$stat^2) * 100, 
+              pval = indspe.zoop$sign$p.value) %>% 
+  rownames_to_column(var = "Taxa")
+
+# # If analyzing with duleg = FALSE, a table of all combinations of clusters is returned
+# indspe.zoop <- multipatt(spe.sub, clusters.k4, duleg = FALSE)
+```
+
