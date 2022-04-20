@@ -13,6 +13,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Load files and libraries
 ```{r}
+ls.packages <- c("tidyverse", "vegan","adespatial","ggrepel","cowplot","here")
+new.packages <- ls.packages[!(ls.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
 library(tidyverse)
 library(vegan)
 library(adespatial)
