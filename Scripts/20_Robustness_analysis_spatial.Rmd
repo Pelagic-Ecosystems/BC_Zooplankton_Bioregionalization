@@ -5,6 +5,11 @@ date: "26/11/2021"
 output: html_document
 ---
 
+# Spatial robustness analysis
+1. Grid samples and assign grid cell variable
+2. Randomly subsample in each cell
+3. Try other resolutions (0.05, 0.1, 0.25, 0.5, 1)
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -91,10 +96,6 @@ dev.off()
 ```
 
 
-# Spatial robustness analysis
-1. Grid samples and assign grid cell variable
-2. Randomly subsample in each cell
-3. Try other resolutions (0.05, 0.1, 0.25, 0.5, 1)
 ```{r}
 set.seed(888)
 

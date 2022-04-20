@@ -5,10 +5,11 @@ date: "24/10/2021"
 output: html_document
 ---
 
+This produces Figure 4 of the Pata et al. PinO manuscript.
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
 
 Load files and libraries
 ```{r}
@@ -37,21 +38,6 @@ head(round( pca.zoop$CA$eig/pca.zoop$tot.chi*100, digits = 1) )
 
 ```
 
-The first 4 PCA axes. 
-```{r}
-p_biplot_pca(rdaoutput = pca.zoop, 
-             cluster = zoopmeta$Bioregion,
-             axestoplot = c(1,2),
-             alpha = 0.6, legendtitle = "Bioregion",
-             clrs = clrs.bioregion)
-
-p_biplot_pca(rdaoutput = pca.zoop, 
-             cluster = zoopmeta$Bioregion,
-             axestoplot = c(3,4),
-             alpha = 0.6, legendtitle = "Bioregion",
-             clrs = clrs.bioregion)
-```
-
 # Subset environmental data for biplot
 The variables are manually selected here based on which were significant from a previous RDA analysis.
 ```{r, fig.height = 6, fig.width = 12}
@@ -62,7 +48,6 @@ ii <- which(zoopenvi2$Temp.surf >= 0 & zoopenvi2$TScov < 0.5 & zoopenvi2$Coverag
 zoopenvi2[ii,]$Temp.net <- NA
 zoopenvi2[ii,]$Sali.net <- NA
 zoopenvi2[ii,]$N2V2.030 <- NA
-
 
 envi.axes12 <- zoopenvi2 %>% 
   dplyr::select(Temperature = "Temp.net", Salinity = "Sali.net",
@@ -105,8 +90,8 @@ g2 <- g2 +
   coord_equal()
 
 
-# pdf(here::here("Figures/PCA_bioregions_01112022.pdf"), width = 12, height = 6) #, units = "in", res = 600)
+pdf(here::here("Figures/Figure_4.pdf"), width = 12, height = 6)
 plot_grid(g1,g2, ncol = 2)
-# dev.off()
+dev.off()
 ```
 

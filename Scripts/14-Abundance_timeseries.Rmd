@@ -5,6 +5,8 @@ date: "02/11/2021"
 output: html_document
 ---
 
+Creates figure 8 and supplementary figure S7 of the Pata et al. PinO manuscript.
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -32,7 +34,7 @@ load(here::here("Data_Output/Assoc_group_kendallresults_11022021.RData"))
 theme_set(theme_bw())
 ```
 
-# Average and relative composition of abundance and biomass by bioregion and season
+Figure S7. Average and relative composition of abundance and biomass by bioregion and season
 ```{r, fig.width=10, fig.height=9}
 bioreg.seas <- bioregions %>% 
   left_join(dplyr::select(zoopmeta,Key,Month, Year)) %>% 
@@ -148,10 +150,10 @@ pg <- plot_grid(g1,g2,g3,g5, align = "hv", labels = c("A","B","C","D"))
 legend <- get_legend( g4 )
 plot_grid(legend, pg, ncol = 1, rel_heights = c(.5, 4))
 
-# png(here::here(paste0("Figures/Composition_abund_biom_season_",Sys.Date(),".png")),
-#     width = 12, height = 9, units = "in", res = 300)
-# plot_grid(legend, pg, ncol = 1, rel_heights = c(.5, 4))
-# dev.off()
+png(here::here(paste0("Figures/Figure_S7_",Sys.Date(),".png")),
+    width = 12, height = 9, units = "in", res = 300)
+plot_grid(legend, pg, ncol = 1, rel_heights = c(.5, 4))
+dev.off()
 ```
 
 # Overall average abundance per bioregion
@@ -202,7 +204,8 @@ g2 <- ggplot(bar.all, aes(x=Bioregion, y=Biomass, fill=AssocGroup.sub)) +
 g2
 ```
 
-# Mean abundance composition timeseries
+# Subplots below for Figure 8.
+Mean abundance composition timeseries
 ```{r, fig.width=10, fig.height=8}
 bar.ts <- zoop_sub %>% 
   left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
@@ -305,7 +308,6 @@ for (i in stripr) {
   k <- k+1
 }
 
-
 png(here::here(paste0("Figures/Composition_Abundance_percent_timeseries_",
                       Sys.Date(),".png")),
     width = 10.5, height = 8, units = "in", res = 300)
@@ -379,140 +381,10 @@ for (i in stripr) {
   g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- clrs.bioregion[k]
   k <- k+1
 }
+
 png(here::here(paste0("Figures/Composition_Biomass_percent_timeseries_",
                       Sys.Date(),".png")),
     width = 10.5, height = 8, units = "in", res = 300)
 grid::grid.draw(g)
 dev.off()
 ```
-
-# Mean total abundance and anomaly for spring (Apr - Jun)
-```{r, fig.width=10, fig.height=8}
-abund.ts <- zoop_sub %>% 
-  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
-            by = "Species") %>% 
-  left_join(dplyr::select(zoopmeta, Key, Year, Month), by = "Key") %>% 
-  left_join(dplyr::select(zoopenvi, Key, DayOfYear), by = "Key") %>% 
-  filter(Month <= 6) %>% 
-  group_by(Key, Bioregion, Year ) %>% 
-  summarise(Abundance = sum(Abundance.m2),
-            Biomass = sum(Biomass.mg.m2)) %>% 
-  group_by(Bioregion, Year) %>% 
-  summarise(Abundance.m = mean(Abundance),
-            Abundance.sd = sd(Abundance),
-            Biomass.m = mean(Biomass),
-            Biomass.sd = sd(Biomass),
-            nsamples = n()) %>% 
-  ungroup() 
-
-g7 <- ggplot(abund.ts, aes(x = Year, y = Abundance.m, color = Bioregion)) +
-  # geom_errorbar(aes(ymin = Abundance.m - Abundance.sd,
-  #                   ymax = Abundance.m + Abundance.sd)) +
-  geom_point(shape = 0) + 
-  geom_line()+
-  scale_color_manual(values = clrs.bioregion) +
-  ylab("Average Abundance") +
-  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
-        legend.text = element_text(size = 16),
-        axis.title = element_text(size = 16),
-        axis.text = element_text(size = 12),
-        legend.position = "top")
-g7
-
-
-abund.ts.anom <- abund.ts %>% 
-  group_by(Bioregion) %>% 
-  mutate(mabu = mean(Abundance.m),
-         mbio = mean(Biomass.m)) %>% 
-  mutate(Abundance.anom = Abundance.m - mean(Abundance.m),
-         Biomass.anom = Biomass.m - mean(Biomass.m))
-
-# Abundance
-g8 <- ggplot(abund.ts.anom, aes(x=Year, y=Abundance.anom)) +
-  geom_bar(stat = "identity") +
-  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
-        legend.text = element_text(size = 16),
-        legend.position = "bottom",
-        axis.title = element_text(size = 16),
-        axis.text = element_text(size = 12),
-        axis.text.x = element_text(angle = 90))+ xlab("Year") +
-  ylab("Average Abundance Anomaly") +
-  scale_x_continuous(breaks = seq(1995, 2014, by = 1))  +
-  coord_cartesian(xlim = c(1995.5,2014)) +
-  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left")
-
-g8
-
-png(here::here(paste0("Figures/Abundance_anomaly_timeseries_spring_",
-                      Sys.Date(),".png")),
-    width = 10.5, height = 8, units = "in", res = 300)
-plot_grid(g7,g8,ncol=1, labels = "auto", rel_heights = c(1,2))
-dev.off()
-```
-
-
-# Mean total abundance and anomaly for summer (Jul-Oct)
-```{r, fig.width=10, fig.height=8}
-abund.ts <- zoop_sub %>% 
-  left_join(dplyr::select(sp.table, Species, AssocGroup, AssocGroup.sub), 
-            by = "Species") %>% 
-  left_join(dplyr::select(zoopmeta, Key, Year, Month), by = "Key") %>% 
-  left_join(dplyr::select(zoopenvi, Key, DayOfYear), by = "Key") %>% 
-  filter(Month %in% c(7,8,9,10)) %>% 
-  group_by(Key, Bioregion, Year ) %>% 
-  summarise(Abundance = sum(Abundance.m2),
-            Biomass = sum(Biomass.mg.m2)) %>% 
-  group_by(Bioregion, Year) %>% 
-  summarise(Abundance.m = mean(Abundance),
-            Abundance.sd = sd(Abundance),
-            Biomass.m = mean(Biomass),
-            Biomass.sd = sd(Biomass),
-            nsamples = n()) %>% 
-  ungroup() 
-
-g9 <- ggplot(abund.ts, aes(x = Year, y = Abundance.m, color = Bioregion)) +
-  # geom_errorbar(aes(ymin = Abundance.m - Abundance.sd,
-  #                   ymax = Abundance.m + Abundance.sd)) +
-  geom_point(shape = 0) + 
-  geom_line()+
-  scale_color_manual(values = clrs.bioregion) +
-  ylab("Average Abundance") +
-  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
-        legend.text = element_text(size = 16),
-        axis.title = element_text(size = 16),
-        axis.text = element_text(size = 12),
-        legend.position = "top")
-g9
-
-
-abund.ts.anom <- abund.ts %>% 
-  group_by(Bioregion) %>% 
-  mutate(mabu = mean(Abundance.m),
-         mbio = mean(Biomass.m)) %>% 
-  mutate(Abundance.anom = Abundance.m - mean(Abundance.m),
-         Biomass.anom = Biomass.m - mean(Biomass.m))
-
-# Abundance
-g10 <- ggplot(abund.ts.anom, aes(x=Year, y=Abundance.anom)) +
-  geom_bar(stat = "identity") +
-  theme(legend.title = element_text(color = 'black', size = 16, face = 'bold'),
-        legend.text = element_text(size = 16),
-        legend.position = "bottom",
-        axis.title = element_text(size = 16),
-        axis.text = element_text(size = 12),
-        axis.text.x = element_text(angle = 90))+ xlab("Year") +
-  ylab("Average Abundance Anomaly") +
-  scale_x_continuous(breaks = seq(1995, 2014, by = 1))  +
-  coord_cartesian(xlim = c(1995.5,2014)) +
-  facet_wrap(~ Bioregion, ncol = 1, scales = "free_y", strip.position = "left")
-
-g10
-
-png(here::here(paste0("Figures/Abundance_anomaly_timeseries_summer_",
-                      Sys.Date(),".png")),
-    width = 10.5, height = 8, units = "in", res = 300)
-plot_grid(g9,g10,ncol=1, labels = "auto", rel_heights = c(1,2))
-dev.off()
-```
-
-

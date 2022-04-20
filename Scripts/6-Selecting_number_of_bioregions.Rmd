@@ -89,7 +89,7 @@ table(kmeans.logchord[,c(4,5)])
 
 
 # Name the bioregions
-K = 4: Nearshore, Deep fjord, Deep shelf, Offshore
+K = 4: Nearshore, Deep Fjord, Deep Shelf, Offshore
 
 Because most of the clustering indices, and especially Indval, selected K=4 as the best number of clusters, this is the final bioregionalization for the study. 
 
@@ -126,8 +126,21 @@ save(file = here::here("Data_Output/zoop_data_regionalized_10252021.RData"),
      taxalist, sp.abund.list)
 ```
 
-Prepare list of sample keys and bioregion assignment for plotting water property depth profiles in Matlab.
-```{r, eval = FALSE}
+# Create supplementary metadatafile with bioregion assignment
+```{r}
+metadata <- zoopmeta[,c(1:20)] %>% 
+  left_join(zoopdiversity, by = c("Key","Bioregion")) %>% 
+  rename(Species.Richness = Richness, Diversity.Evenness = Evenness,
+         DFO.Region = Region) %>% 
+  left_join(dplyr::select(zoopenvi, Key, DayOfYear, Temp.net, Sali.net, Dens.net,
+                          MLD, Stratification = N2V2.030, Oxyg.surf, 
+                          Nitr.surf, Phos.surf, Sili.surf, 
+                          Chla, Chla.micro = micro, Chla.nano = nano, 
+                          Chla.pico = pico, PAR, ZEU, POC, PIC,
+                          NPGO, PDO, ENSO, NPI), 
+            by = "Key")
 
+write.csv(metadata, 
+          file = here::here("Data_Output/BC_zooplankton_metadata_environmental_vars.csv"))
 ```
 

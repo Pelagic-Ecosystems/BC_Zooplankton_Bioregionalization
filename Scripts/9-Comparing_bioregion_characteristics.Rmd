@@ -5,7 +5,9 @@ date: "24/10/2021"
 output: html_document
 ---
 
-This creates a table that compares the physical, chemical, biological, and methodological characteristics of the bioregions. The sample size for each characteristic varies depending on the number of observations. Tests of significant difference between bioregions for each characteristic is also done.
+This creates Table 2 of the Pata et al. PinO manuscript. Also Figure S1 and S4a.
+
+The table compares the physical, chemical, biological, and methodological characteristics of the bioregions. The sample size for each characteristic varies depending on the number of observations. Tests of significant difference between bioregions for each characteristic is also done. The components of the table need to be organized manually in a spreadsheet.
 
 Mean total abundance and biomass are calculated both for the taxa included in the regionalization (flag = 1) and also with the excluded taxa (flag = 2,3). This does not change the relative differences between regions according to abundance or biomass but it does change the mean total magnitude of the plankton community.
 
@@ -33,9 +35,10 @@ load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
 ```
 
 
-Distribution of bioregion samples along the depth gradient. Density is the number of samples per depth bin, kernel is gaussian.
+Supplementary Figure 1
+Distribution of bioregion samples along the depth gradient. Density is the number of samples per depth bin, kernel is Gaussian.
 ```{r}
-g1 <- ggplot(zoopmeta, 
+figs1 <- ggplot(zoopmeta, 
        aes(x = Bottom.Depth, fill = Bioregion)) +
   # geom_histogram(alpha = 0.5, position = "identity", color = "black") +
   geom_histogram(alpha = 0.3, aes(y = ..density..), position = "identity") +
@@ -52,14 +55,13 @@ g1 <- ggplot(zoopmeta,
         axis.title = element_text(size = 16),
         axis.text = element_text(size = 12))
 
-g1
+figs1
 
-# png(here::here(paste0("Figures/Supp_depth_dist_",Sys.Date(),".png")),
-#     width = 8, height = 4, units = "in", res = 300)
-# g1
-# dev.off()
+png(here::here(paste0("Figures/Supp_figure_S1_",Sys.Date(),".png")),
+    width = 8, height = 4, units = "in", res = 300)
+figs1
+dev.off()
 ```
-
 
 Biology
 ```{r}
@@ -150,7 +152,8 @@ phychm <- zoopenvi %>%
 phychm <- phychm %>% 
   dplyr::select(Key, Bioregion,
          Temperature = "Temp.net", Salinity = "Sali.net", CoverageTS,
-         Spice = "Spice.net", Density = "Dens.net", MLD, Stratification = "N2V2.030",
+         Spice = "Spice.net", Density = "Dens.net", 
+         MLD, Stratification = "N2V2.030",
          Chlorophyll = "Chla", Microplankton = "micro",
          Nanoplankton = "nano", Picoplankton = "pico", ZEU, POC, PIC, PAR) %>% 
   left_join(dplyr::select(zoopmeta, Key, Month)) %>% 
@@ -175,7 +178,6 @@ phychm %>%
                    na.rm = TRUE))
 
 ```
-
 
 
 Produce summary tables and export
@@ -243,7 +245,6 @@ summary(phychm.sum.tableby)
 write.csv(as.data.frame(summary(phychm.sum.tableby)),
           file = paste0(fol,"phychm_tableby_2dec_",Sys.Date(),".csv"))
 
-
 ```
 
 # Significance tests between bioregions
@@ -286,11 +287,11 @@ write.csv(file = paste0(fol,"Dunn_",Sys.Date(),".csv"), dunn.results)
 ```
 
 
+Figure S4a.
 Fitted spline of chlorophyll-a per month and bioregion
 ```{r, eval = FALSE, fig.width=7, fig.height=4}
-g <- ggplot(data = phychm, aes(x = Month, y = Chlorophyll, color = Bioregion, 
-                          fill = Bioregion)) +
-  # geom_point() +
+figs4a <- ggplot(data = phychm, aes(x = Month, y = Chlorophyll, 
+                                    color = Bioregion, fill = Bioregion)) +
   geom_smooth(method = "loess", size = 2) +
   ylab(expression("Chlorophyll a " ~(mgm^-3))) +
   scale_x_continuous(name = "Month", breaks = c(4:10), 
@@ -301,11 +302,11 @@ g <- ggplot(data = phychm, aes(x = Month, y = Chlorophyll, color = Bioregion,
   theme(legend.position = "none",
         axis.title = element_text(size = 14),
         axis.text = element_text(size = 14))
-g
+figs4a
 
 
-png(here::here("Figures/chlorophyll_monthly_spline.png"),
+png(here::here("Figures/Supp_S4a_chlorophyll_spline.png"),
     width = 7, height = 3, units = "in", res = 600)
-g
+figs4a
 dev.off()
 ```

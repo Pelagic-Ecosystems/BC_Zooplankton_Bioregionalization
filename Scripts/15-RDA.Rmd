@@ -8,6 +8,8 @@ editor_options:
     wrap: 72
 ---
 
+Produces information for creating figure S5a and supplementary table S1 of Pata et al. PinO manuscript.
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```

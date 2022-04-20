@@ -5,7 +5,9 @@ date: "20/10/2021"
 output: html_document
 ---
 
-This includes code that prepares the zooplankton and environmental data set for statistical analysis. It will subset the samples that will be used in all subsequent analyses. This includes limiting the monthly period of analysis and the removing samples with low species richness. Note the cross tabulated dataframes or species matrices were based on abundance (individuals/m2) at the species-level. If biomass, or genus,etc-level analysis are desired, these can be recalculated from the zoop_sub dataframe.
+Creates Table 1 of the Pata et al. PinO manuscript.
+
+This includes code that prepares the zooplankton and environmental data set for statistical analysis. It will subset the samples that will be used in all subsequent analyses. This includes limiting the monthly period of analysis and the removing samples with low species richness. Note the cross tabulated dataframes or species matrices were based on abundance (individuals/m2) at the species-level. If biomass, or genus/etc-level analysis are desired, these can be recalculated from the zoop_sub dataframe.
 
 General workflow:
 1. Update species richness
@@ -51,7 +53,7 @@ zoopmeta <- left_join(zoopmeta, sprich)
 sprichcount <- sprich %>% 
   group_by(N.Species) %>% 
   count()
-sprichcount$cumsum <-  cumsum(sprichcount$n)
+sprichcount$cumsum <- cumsum(sprichcount$n)
 
 histogram(zoopmeta$N.Species)
 
@@ -188,3 +190,18 @@ zoop.logchord <- decostand( zoop.log, method = "normalize")
 ```{r}
 save.image(file = here::here("Data_Output/zoop_data_for_regionalization_10252021.RData"))
 ```
+
+# 8. Table 1. Summary table of sampling methodology
+```{r}
+samp.sum <- zoopmeta %>% 
+  group_by(Net.Type, Net.Mouth, Mesh.Size) %>% 
+  summarise(n = n(), min.tow = min(Tow.Depth), max.tow = max(Tow.Depth),
+            mean.tow = mean(Tow.Depth), min.ratio = min(Tow.Ratio), 
+            max.ratio = max(Tow.Ratio), mean.ratio = mean(Tow.Ratio))
+
+write.csv(file= "Data_Output/sampling_method_summary.csv", samp.sum)
+
+```
+
+
+

@@ -12,7 +12,7 @@ The environmental data are then merged with netmetadata dataframe extracted here
 Notes on the environmental data:
 1. ENSO index is based on the Nino3.4 index.
 2. Satellite climatology is the monthly average from Sep 1997 to Aug 2020.
-3. Satellite-derived variables uses monthly values when available (~>80% of samples) and the climatology when not.
+3. Satellite-derived variables uses monthly values when available (~>80% of samples) and the climatology when not available.
 4. "Surface" ctd and bottle is set as the 0-50m integrated average.
 5. CTD and Bottle data were first binned to 1 m depth bins and then integrated by averaging across the net tow depth.
 

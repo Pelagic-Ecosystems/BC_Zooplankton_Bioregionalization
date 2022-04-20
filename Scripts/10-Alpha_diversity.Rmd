@@ -5,6 +5,7 @@ date: "26/10/2021"
 output: html_document
 ---
 
+This outputs supplementary figure S3.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -122,7 +123,7 @@ zoop.accum.merge <- bind_rows( mutate(zoop.accum, sp = "160"),
                                mutate(zoop.accum.all, sp = "455") )
 
 
-g <- ggplot(zoop.accum.merge, aes(x = sites, y = richness,
+figs3 <- ggplot(zoop.accum.merge, aes(x = sites, y = richness,
                                   colour = Bioregion, linetype = sp)) +
   # geom_ribbon(aes(x = sites,y = richness, ymin = richness - sd, ymax = richness + sd, 
   #                 fill = Bioregion), alpha = .2) +
@@ -144,11 +145,11 @@ g <- ggplot(zoop.accum.merge, aes(x = sites, y = richness,
   ylab("Species Richness") + xlab ("# Samples")+
   scale_x_continuous(breaks = c(0,250,500,750,1000,1250))+
   scale_y_continuous(breaks = c(0,100,200,300,400))
-g
+figs3
 
-png(here::here(paste0("Figures/species_accum_",Sys.Date(),".png")),
+png(here::here(paste0("Figures/Figure_S4_",Sys.Date(),".png")),
     width = 5, height = 4, units = "in", res = 300)
-g
+figs3
 dev.off()
 ```
 

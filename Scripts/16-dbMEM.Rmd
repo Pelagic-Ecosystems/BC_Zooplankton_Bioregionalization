@@ -5,6 +5,8 @@ date: "02/11/2021"
 output: html_document
 ---
 
+Creates supplementary figure S5 of the Pata et al. PinO manuscript.
+
 # dbMEM analysis
 The process is to first identify if there are significant linear trends for the spatial (or temporal) coordinates. If there are, these need to be included in the variance partitioning which means that in the dbMEM analysis, the response matrix needs to be detrended first to identify a separate set of dbMEM variables (which are orthogonal to the linear trends). The significant dbMEM axes would then be manually inspected and classified if these are broad-scale or fine-scale structures. Then, variance partitioning is done to have an overall model to identify how much the environmental variables induce the spatial structures of the linear trends and the more complicated dbMEM trends + the scale of the finer structures which can be interpreted as autocorrelation due to neutral processes. Note that when interpreting the shared variance between the environmental variables and the dbMEM structures: these could mean either the environment structured the community or there are unaccounted for processes that structure both the environmental variables and the community.
 

@@ -5,6 +5,7 @@ date: "27/10/2021"
 output: html_document
 ---
 
+Performs the Indicator Value analysis for Table 3 and Table S2 for Pata et al. PinO manuscript.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -36,8 +37,6 @@ Calculate the indicator value from the untransformed species abundance table alt
 ```{r, fig.width=10, fig.height=8}
 indval.zoop <- indval(zoop_abundance, zoopmeta$Bioregion,
                       numitr=10000)
-# indval.zoop <- indval(zoop.log, zoopmeta$Bioregion,
-#                       numitr=10000)
 
 summary(indval.zoop, p=0.05, type='short', digits=2, show=p,
           sort=FALSE, too.many=100)

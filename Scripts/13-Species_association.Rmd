@@ -5,7 +5,10 @@ date: "27/10/2021"
 output: html_document
 ---
 
-In this species association analysis, a concordance analysis is done with the assumption that species association are hierarchically structured. The log-transformed abundances are correlated between species and the correlation matrix is then converted to a distance matrix for clustering. 
+
+Performs the concordance analysis for Table 3 and Table S2 for Pata et al. PinO manuscript.
+
+For the species association analysis, a concordance analysis is done with the assumption that species association are hierarchically structured. The log-transformed abundances are correlated between species and the correlation matrix is then converted to a distance matrix for clustering. 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -36,7 +39,6 @@ load(here::here("Data_Output/Indicator_values_11012021.RData"))
 
 # Correlate and cluster
 This follows steps 1-4 of the R-mode process in the kendall.global() description which is in Legendre (2012 p.395). Recommended in Borcard (2018, p. 52) in reference to Legendre (2005) that species data should be pre-transformed (box-cox series) to remove effect of total abundance per site in calculating correlations.
-
 ```{r, fig.width=12, fig.height=6}
 # log-chord transformed table
 assoc.cor <- cor(zoop.logchord, method = "spearman")
@@ -99,9 +101,10 @@ ggplot(filter(ceval.long, Index == "Avg.Silhouette.Width"), aes(x = NumClusters,
 # Plot association group clusters at various levels
 ```{r, fig.width=12, fig.height=4}
 for (k in c(3:10)) {
-  dend.hel <- fviz_dend(assoc.clust, cex = 0.6, k = k,color_labels_by_k = TRUE, hang = 10, 
-                        k_colors = "d3", rect = TRUE, rect_border = "d3", rect_fill = TRUE,
-                        main = paste(k,"groups"))
+  dend.hel <- fviz_dend(assoc.clust, cex = 0.6, k = k,
+                        color_labels_by_k = TRUE, hang = 10, 
+                        k_colors = "d3", rect = TRUE, rect_border = "d3",
+                        rect_fill = TRUE, main = paste(k,"groups"))
   print(dend.hel)
 }
 
@@ -300,7 +303,7 @@ dend.hel
 # dev.off()
 ```
 
-Dendrogram with colored nodes according to bioregion with highest IndVal.
+Figure 7a. Dendrogram with colored nodes according to bioregion with highest IndVal.
 ```{r, fig.width=8, fig.height=4}
 d1 <- dend.r %>% 
   set("leaves_pch",19) %>% 
@@ -389,7 +392,7 @@ AB.vec <- as.data.frame(AB.vec) %>%
                   "FID-OS","FID-DS","FID-NS","FID-DF") )
 ```
 
-NMDS plots for association group level
+Figure S7b. NMDS plots for association group level
 ```{r, fig.height=11, fig.width=11}
 
 # Update sp names of some species
@@ -471,7 +474,8 @@ g2
 dev.off()
 ```
 
-Indval nmds colored by bioregion assignment in indval. For possible subplot overlayed at upper rightside of assoc group nmds
+Figure 7 inset.
+Indval nmds colored by bioregion assignment in indval. For subplot overlayed at upper rightside of assoc group nmds
 ```{r, fig.height=5, fig.width=5}
 g3 <- ggplot(indval.nmds.scores, 
        aes(x = NMDS1, y = NMDS2, color = Bioregion)) +

@@ -32,11 +32,11 @@ taxa <- zoop_sub %>%
 taxalist <- taxa %>% 
   unique()
 
-# number of samples 
+# Number of samples 
 n1 <- length(unique(zoop_sub$Key))
 n2 <- length(unique(filter(zoop_sub,Month >= 4 & Month <= 10)$Key))
 
-# Count the number of samples a taxa was recorded for the entire dataset and also for the April-October period
+# Count the number of samples a taxa was recorded for the entire dataset and also for the April-October period.
 A <- zoop_sub %>% 
   select(Key,Name) %>% unique() %>% count(Name) %>% 
   mutate(Name.Perc = floor(n/n1*10000)/100) %>% select(-n)

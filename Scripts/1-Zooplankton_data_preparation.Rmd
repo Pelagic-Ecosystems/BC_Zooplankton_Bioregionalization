@@ -25,7 +25,7 @@ library(here)
 `%notin%` <- Negate(`%in%`)
 
 # Load the data
-zoop <-  read_csv(here::here("Data_Raw/Zoop_BC_08122020_clean.csv"), col_types = "fffffffffffffffnnnnnnnnnnnnnnnnnnn" ) # This is the concatenated DFO csv files without notes column
+zoop <-  read_csv(here::here("Data_Raw/Zoop_BC_08122020_clean.csv"), col_types = "fffffffffffffffnnnnnnnnnnnnnnnnnnn" ) # This is the concatenated DFO csv files without the notes column.
 zoop <-  as_tibble(zoop)
 
 # Count unique keys
@@ -184,9 +184,7 @@ rm(red, intercal, intercal.retain)
 ```
 
 7. Remove low tow ratios in shallow waters
-Based on project discussion on April 2021, various tow ratio thresholds were explored and the group decided to remove samples with Tow.Ratio < 70% of bottom depth when tow depth was < 100 m. 
-
-Note that instances of low tow ratios when the tow depth are ~150m and ~250m.
+The authors decided to remove samples with Tow.Ratio < 70% of bottom depth when tow depth was < 100 m.
 ```{r}
 red <- zoop_sub %>%
   dplyr::select(Key,Station,Project,Depth_Start,`Depth_Bottom(m)`,Tow.Ratio,
@@ -205,8 +203,6 @@ ggplot(data = red[-ii,], aes(x = Tow.Ratio, y = Depth_Start,
     geom_point(size = 2, shape = 16, alpha = 0.5) +
   xlim(0,1) + 
   ggtitle("Exclude Tow Ratio < 0.7 & Tow Depth < 100")
-
-# rm.3 <- which(red$Tow.Ratio < 0.7 & red$Depth_Start <= 115)
 
 # Exclude samples
 zoop_sub <- zoop_sub %>% 

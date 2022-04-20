@@ -4,6 +4,7 @@ author: "Patrick Pata"
 date: "02/11/2021"
 output: html_document
 ---
+Creats figure 5 of the Pata et al. PinO manuscript.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -26,26 +27,14 @@ load(here::here("Data_Output/zoop_data_regionalized_10252021.RData"))
 load(here::here("Data_Output/dbMEM_significant_MEMS_11072021.RData"))
 ```
 
-
-
-# Variance partitioning
-How much of the variance explained by the environmental variables potentially associated to autocorrelation?
+Variance partitioning of spatial dbMEM and all environmental variables
 ```{r}
-vars.envi2 <- dplyr::select(vars.envi, -Key)
+vars.envi2 <- select(vars.envi, -Key)
 
-dbmem.broad <- bind_cols(vars.xy, dbmem.yearday.broad, dbmem.space.broad)
-dbmem.fine <- bind_cols(dbmem.yearday.fine, dbmem.space.medfine)
-
-vp <- varpart(zoop.rda, vars.envi2,
-              dbmem.broad, dbmem.fine)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","Broad","Fine"))
-
-```
+dbmem.broad <- bind_cols(vars.xy, dbmem.space.broad)
+dbmem.fine <- dbmem.space.medfine
 
 
-# How much variance does the bioregionalization capture?
-```{r}
 # Plot as dummy variable for variance partitioning
 breg <- as.data.frame(model.matrix(~ zoopmeta$Bioregion)[,-1])
 rda.reg <- rda(zoop.logchord, breg)
@@ -57,182 +46,105 @@ breg <- as.data.frame(model.matrix(~ a$Bioregion)[,-1])
 rda.reg <- rda(zoop.rda, breg)
 sum(rda.reg$CCA$eig)/rda.reg$tot.chi*100
 
-vp <- varpart(zoop.rda, vars.envi2,
-              dbmem.broad, breg)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","Broad","Bioregions"))
-
-vp <- varpart(zoop.rda, vars.envi2,
-              bind_cols(dbmem.broad, dbmem.fine),
-              breg)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","All structures","Bioregions"))
+varpart(zoop.rda, vars.xy, dbmem.space.broad)
+varpart(zoop.rda, dbmem.space.broad, dbmem.space.medfine)
 
 
 vp <- varpart(zoop.rda, vars.envi2,
-              dbmem.broad, dbmem.fine, breg)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","Broad","Fine","Bioregions"))
-
-
-vp <- varpart(zoop.rda, vars.envi2,
-              bind_cols(vars.xy, dbmem.space.broad), 
+              bind_cols(vars.xy, dbmem.broad), 
               breg)
 vp
 plot(vp, digits = 2, Xnames = c("Environment","Broad Space","Bioregions"))
 
-
-vp <- varpart(zoop.rda, vars.envi2,
-              bind_cols(vars.xy, dbmem.space.broad), 
-              dbmem.space.medfine, breg)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","Broad Space","Fine Space","Bioregions"))
-
-
 ```
-
-Are the variance explained by the bioregionalization related to the PCA axes? Yes: 16% shared with PC1-2, and 18% shared with PC1-4, 19.6% PC1-5.
-```{r}
-pca.zoop <- rda(zoop.logchord)
-# Variance explained
-head(round( pca.zoop$CA$eig/pca.zoop$tot.chi*100, digits = 1) )
-stscores <- as.data.frame(scores(pca.zoop, choices = c(1:5), display = "sites"))
-stscores <- stscores %>% 
-  rownames_to_column("Key")
-stscores <- dplyr::select(vars.envi,Key) %>% 
-  left_join(stscores) %>% 
-  dplyr::select(-Key)
-
-vp <- varpart(zoop.rda, vars.envi2,
-              stscores, breg)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","PCA","Bioregions"))
-```
-
-
-Variance explained between spatial and temporal structures
-```{r}
-dbmem.sp <- bind_cols(vars.xy, dbmem.space.medfine, dbmem.space.broad)
-dbmem.tm <- bind_cols(dbmem.yearday.fine, dbmem.yearday.broad )
-
-vp <- varpart(zoop.rda, vars.envi2,
-              dbmem.sp, dbmem.tm)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","Spatial","Temporal"))
-```
-
 
 Variance explained by methodological differences
 ```{r}
 vars.meta <- zoop.rda %>% 
   rownames_to_column("Key") %>% 
-  dplyr::select(Key) %>% 
-  left_join(dplyr::select(zoopmeta, Key, Twilight, Tow.Depth, Volume.Filtered.m3,
+  select(Key) %>% 
+  left_join(select(zoopmeta, Key, Twilight, Tow.Depth, Volume.Filtered.m3,
                    Tow.Ratio, Net.Type, Net.Mouth, Mesh.Size, Time)) %>% 
-  mutate(OVnet = if_else(Net.Type == "Bongo ONH","Oblique","Vertical")) %>% 
-  left_join( mutate(vars.envi, Key = rownames(zoop.rda)) ) %>% 
   mutate(Net.Mouth = as.factor(Net.Mouth),
          Mesh.Size = as.factor(Mesh.Size))
-  # mutate(Bongo = if_else(Net.Type %in% c("Bongo ONH","Bongo VNH"),"Bongo","NotBongo"))
 
 rda.meta <- rda(zoop.rda ~ Twilight + Net.Mouth + Mesh.Size + Net.Type,
                 data = vars.meta)
 (RsquareAdj(rda.meta)$adj.r.squared)
 ```
 
-Convert the sampling methodology to dummy variables so these could be included in the variance partitioning. Note that will consume some degrees of freedom but that is fine given the large size of the dataset. See that this will have the same variance explained as above. Forward selection will select only 8 variables which are twilight, net mouth .56 & .58, mesh size 250,253,236, and net type bongo OVN, VNH. This is now surprising since the these would be enough to represented the other negated factors
+Figure 5a. RDA with 4 environmental variables.
 ```{r}
-dummy.meta <- cbind( model.matrix(~ vars.meta$Net.Mouth)[,-1],
-                     model.matrix(~ vars.meta$Mesh.Size)[,-1],
-                     model.matrix(~ vars.meta$Net.Type)[,-1],
-                     vars.meta$Twilight)
-dummy.meta <- as.data.frame(dummy.meta)
+# RDA
+vars.envi3 <- vars.envi2 %>% 
+  select(depth, salinity, temperature, microplankton)
+rda.all <- rda(zoop.rda ~ ., vars.envi3)
+(R2adj <- RsquareAdj(rda.all)$adj.r.squared)
+rda.all.ax12 <- scores(rda.all, choices = c(1:2), display = "lc")
 
-rda.meta <- rda(zoop.rda~., dummy.meta)
-(RsquareAdj(rda.meta)$adj.r.squared)
-rda.meta <- rda(X = zoop.rda, Y = dummy.meta, Z = vars.envi2)
-(RsquareAdj(rda.meta)$adj.r.squared)
+# variance explained of the constrained axes
+varexp.RDA <- round( rda.all$CCA$eig/rda.all$tot.chi*100, digits = 1)
+head(varexp.RDA)    
 
-# forward select dummy meta variables
-rda.meta.fwd <- forward.sel(zoop.rda, dummy.meta)
-rda.meta.fwd
+# variance explained of the unconstrained axes
+varexp.PC <- round( rda.all$CA$eig/rda.all$tot.chi*100, digits = 1)
+head(varexp.PC)    
 
-# the subset dummy metadata variables
-dummy.meta.fwd <- dummy.meta[,c(rda.meta.fwd$order)]
+# Scaling 2 is a correlation triplot... angles between arrows reflect correlations.
+rda.scores.arrows <- scores(rda.all, choices = c(1:4), display = "bp", scaling = 2) 
+rda.scores.sites <- scores(rda.all, choices = c(1:4), display = "lc", scaling = 2) 
 
-rda.meta <- rda(zoop.rda~., dummy.meta.fwd)
-(RsquareAdj(rda.meta)$adj.r.squared)
-rda.meta <- rda(X = zoop.rda, Y = dummy.meta.fwd, Z = vars.envi2)
-(RsquareAdj(rda.meta)$adj.r.squared)
+rda.scores.sites <- as.data.frame(rda.scores.sites) %>% 
+  rownames_to_column("Key") %>% 
+  left_join(bioregions)
 
-# conditioned by envi vars + structures
-rda.meta <- rda(X = zoop.rda, Y = dummy.meta.fwd, 
-                Z = bind_cols(vars.envi2, dbmem.broad, dbmem.fine) )
-(RsquareAdj(rda.meta)$adj.r.squared)
+rda.arrow.df <- data.frame(variable = rownames(rda.scores.arrows),
+                           x1 = rep(0,nrow(rda.scores.arrows)),
+                           y1 =rep(0,nrow(rda.scores.arrows)), 
+                           xend = rda.scores.arrows[,1],
+                           yend = rda.scores.arrows[,2])
+      
+fig5a <- ggplot(rda.scores.sites, 
+       aes_string("RDA1", "RDA2", colour = "Bioregion")) + 
+  geom_point(size = 3, alpha = 0.3, shape = 16) + 
+  stat_ellipse(size = 1.5,show.legend = FALSE,level = 0.9) +
+  geom_vline(xintercept = 0, colour='darkgray') + 
+  geom_hline(yintercept = 0, colour='darkgray') +
+  theme_bw()+
+  theme(legend.position="none", 
+        legend.background = element_rect(colour="gray", 
+                                         size=0.5, linetype="solid"),
+        legend.title = element_text(color = 'black', size = 16, face = 'bold'),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 16)) + 
+  labs(x = paste0("RDA1 (",varexp.RDA[1],"%)"), 
+       y = paste0("RDA2 (",varexp.RDA[2], "%)" )) +
+  scale_color_manual(values = clrs.bioregion, name = "Bioregion") +
+  geom_segment(data = rda.arrow.df, aes(x = x1, y = y1, 
+                                        xend = xend, yend = yend),
+               lineend = "round", size = 1, colour = "black",
+               arrow = arrow(length = unit(0.21, "cm"))) +
+  geom_text_repel(data = rda.arrow.df, aes(x = xend, y = yend,
+                                           label=variable), 
+                  color="black", size = 5) +
+  scale_x_reverse()
 
+
+
+pdf(here::here("Figures/Figure_5a.pdf"),
+    width = 6, height = 6)
+fig5a
+dev.off()
 ```
 
-# Variance partitioning with method bias
-The significant dbMEM do not need to be forward selected because we want to capture all structures no matter how small (the smallest being autocorrelations).
+Figure 5b. Variance partitioning with 4 environmental variables. This figure is manually edited to add color and adjust layout.
 ```{r}
-vp <- varpart(zoop.rda, vars.envi2,
-              dbmem.broad, dbmem.fine,dummy.meta.fwd)
+vp <- varpart(zoop.rda, vars.envi3,
+              bind_cols(vars.xy, dbmem.space.broad), 
+              breg)
 vp
-plot(vp, digits = 2, Xnames = c("Environment","Broad","Fine","Method"))
+plot(vp, digits = 2, Xnames = c("Environment","Broad Space","Bioregions"))
+
 
 ```
-
-Test the unique fractions that are purely one category
-```{r, eval=FALSE}
-# pure environmental
-a <- rda(X = zoop.rda, Y = vars.envi2, 
-      Z = bind_cols(dbmem.broad, dbmem.fine,dummy.meta.fwd))
-anova(a)
-
-# pure broad-scale
-b <- rda(X = zoop.rda, Y = dbmem.broad,
-      Z = bind_cols(vars.envi2, dbmem.fine,dummy.meta.fwd))
-anova(b)
-
-# pure fine-scale
-c <- rda(X = zoop.rda, Y = dbmem.fine,
-      Z = bind_cols(vars.envi2, dbmem.broad,dummy.meta.fwd))
-anova(c)
-
-# pure method
-d <- rda(X = zoop.rda, Y = dummy.meta.fwd, 
-      Z = bind_cols(vars.envi2, dbmem.broad, dbmem.fine))
-anova(d)
-```
-
-
-Variance explained between broad spatial and temporal structures only and have separate models of fine-scale structure with partialled out components
-```{r}
-dbmem.sp2 <- bind_cols(vars.xy, dbmem.space.broad)
-dbmem.tm <- bind_cols(dbmem.yearday.fine)
-
-
-vp <- varpart(zoop.rda, vars.envi2,
-              dbmem.sp2, dbmem.yearday.broad)
-vp
-plot(vp, digits = 2, Xnames = c("Environment","Broad Spatial","Broad Temporal"))
-
-rda.fine <- rda(X = zoop.rda, Y = dbmem.fine)
-(RsquareAdj(rda.fine)$adj.r.squared)
-# fine-scale structures conditioned by envi vars + broad structures + meta
-rda.fine <- rda(X = zoop.rda, Y = dbmem.fine, 
-                Z = bind_cols(vars.envi2, dbmem.broad, dummy.meta.fwd) )
-(RsquareAdj(rda.fine)$adj.r.squared)
-
-```
-
-Variance partitioning of envi+broad vs fine vs method
-```{r}
-vp <- varpart(zoop.rda, bind_cols(vars.envi2,dbmem.broad),
-              dbmem.fine, dummy.meta.fwd)
-vp
-plot(vp, digits = 2, Xnames = c("Environment + Broad Structures","Fine Structures","Methods"))
-```
-
-
-

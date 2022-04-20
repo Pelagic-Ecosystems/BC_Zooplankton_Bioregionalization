@@ -5,9 +5,9 @@ date: "20/10/2021"
 output: html_document
 ---
 
-Various bioregionalization methods will be explored and evaluated by different indices. This will load the curated and wrangled dataset prepared in 4-Zooplankton_data_wrangling.Rmd. At the end of this file, the best cluster analysis solution is saved including a dataframe of the cluster rankings with the other methods. This file should be loade din the next sections as the basis of the regionalization.
+Various bioregionalization methods will be explored and evaluated by different indices. This will load the curated and wrangled dataset prepared in 4-Zooplankton_data_wrangling.Rmd. At the end of this file, the best cluster analysis solution is saved including a dataframe of the cluster rankings with the other methods. This file should be loaded in the next sections as the basis of the regionalization.
 
-Along the way, intermediary data frames are also saved in the Data_Output folder/temp. This include the dissimilarity matrices which are 0.25 GB and the results of the 9 cluster analysis methods which would take a while to compute (at least 2 hours).
+Along the way, intermediary data frames are also saved in the Data_Output folder/temp. This includes the dissimilarity matrices which are 0.25 GB and the results of the 9 cluster analysis methods which would take a while to compute (at least 2 hours).
 
 The main references for statistics notes here are from Legendre and Legendre 2012. Numerical Ecology and Borcard and Legendre 2018 Numerical Ecology with R.
 
@@ -42,11 +42,11 @@ theme_set(theme_bw())
 ```
 
 # 1. Calculate dissimilarity matrices and apply pcoa
-Note that BCD and Sorensen distances are semi-metric need to be square-rooted before PCOA. Note that PCOA of the logchord dissimilarity is the same as PCA of the logchord transformed species matrix.
+Note that BCD and Sorensen distances are semi-metric need to be square-rooted before PCOA. Note that PCOA of the log-chord dissimilarity is the same as PCA of the log-chord transformed species matrix.
 
 is.euclid() function is available in the ade4 package to confirm if matrices are metric.
 
-vegan::cmdscale() and ape:pcoa() are the same methods and would produce the same results but I prefer using pcoa() because it alread calculates the relative eigenvalues.
+vegan::cmdscale() and ape:pcoa() are the same methods and would produce the same results but I prefer using pcoa() because it already calculates the relative eigenvalues.
 ```{r}
 zmat.soren <- vegdist(zoop.pa, method = "bray", binary = TRUE)
 zmat.bcd <- vegdist(zoop.log, method = "bray")
@@ -55,15 +55,6 @@ zmat.lchord <- dist(zoop.logchord)
 zmat.pcoa.soren <- pcoa(sqrt(zmat.soren)) 
 zmat.pcoa.bcd <- pcoa(sqrt(zmat.bcd)) 
 zmat.pcoa.lchord <- pcoa(zmat.lchord)
-
-# # Inspect if ordinations are similar
-# z.pca.lchord <- rda(zoop.logchord)
-# head(zmat.pcoa.lchord$values$Relative_eig)
-# head( z.pca.lchord$CA$eig / sum(z.pca.lchord$CA$tot.chi) )
-# 
-# head(zmat.pcoa.soren$values$Relative_eig)
-# head(zmat.pcoa.bcd$values$Relative_eig)
-# head(zmat.pcoa.lchord$values$Relative_eig)
 
 ```
 
@@ -75,7 +66,6 @@ Lchord-BCD: r = 0.9723, p = 0.001
 vegan::mantel(zmat.soren, zmat.bcd)
 vegan::mantel(zmat.soren, zmat.lchord)
 vegan::mantel(zmat.lchord, zmat.bcd)
-
 ```
 
 
@@ -387,7 +377,7 @@ A Kruskal-Wallis H test was used to test if there are significant differences be
 
 Differences in clustering strength (as ranks) are compared here, not the cluster solutions themselves.
 ```{r}
-kruskal.test(Rank ~ Method, data= gci.df.methods)
+kruskal.test(Rank ~ Method, data = gci.df.methods)
 
 dunn.test(gci.df.methods$Rank, gci.df.methods$Method,
           method = "bh")
