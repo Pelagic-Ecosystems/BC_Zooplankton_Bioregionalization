@@ -196,7 +196,9 @@ save.image(file = here::here("Data_Output/zoop_data_for_regionalization_10252021
 samp.sum <- zoopmeta %>% 
   group_by(Net.Type, Net.Mouth, Mesh.Size) %>% 
   summarise(n = n(), min.tow = min(Tow.Depth), max.tow = max(Tow.Depth),
-            mean.tow = mean(Tow.Depth), min.ratio = min(Tow.Ratio), 
+            mean.tow = mean(Tow.Depth), 
+            min.dep = min(Bottom.Depth), max.dep = max(Bottom.Depth),
+            mean.dep = mean(Bottom.Depth),min.ratio = min(Tow.Ratio), 
             max.ratio = max(Tow.Ratio), mean.ratio = mean(Tow.Ratio))
 
 write.csv(file= "Data_Output/sampling_method_summary.csv", samp.sum)
