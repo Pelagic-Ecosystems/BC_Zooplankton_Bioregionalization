@@ -1,5 +1,5 @@
 # BC_Zooplankton_Bioregionalization
- Analysis scripts for the BC zooplankton bioregionalization paper by Pata et al. in Progress in Oceanography (under review) and the methods paper in MethodsX (in prep).
+ Analysis scripts for the BC zooplankton bioregionalization paper by Pata et al. in Progress in Oceanography (in press) and the methods paper in MethodsX (submitted).
  
  The "Scripts" folder contains 20 files which were run in sequence to produce the outputs for the two manuscripts. Files 1-9 include the analyses for the MethodsX manuscript. Script files 1-4 include data curation steps. Files 5-6 contains the bioregionalization method selection and files 7-9 contains the robustness analysis. Files 10-20 contain the analyses for the Progress in Oceanography manuscript. A directory for the scripts files to produce the Progress in Oceanography tables and figures are provided below. File 6 outputs the supplementary metdatafile with bioregion assignment. Figures 2 and 9 were not generated from R scripts.
  
