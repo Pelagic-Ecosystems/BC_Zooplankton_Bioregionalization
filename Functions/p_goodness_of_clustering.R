@@ -94,7 +94,17 @@ mondo.fisher <- function(comm, clust) {
   res <- matrix(NA, nrow = rows, ncol = cols)
   for (i in 1:rows) {
     for (j in 1:cols) {
-      res[i, j] <- fisher.test(comm[, i] > 0, clust == j)$p.val
+      
+      # res[i, j] <- fisher.test(comm[, i] > 0, clust == j)$p.val
+      x <- comm[,i]>0
+      y <- clust == j
+      z <- table(x,y)
+      if(nrow(z)>1 & ncol(z)>1){
+        res[i, j] <- fisher.test(x,y)$p.val
+      } else {
+        res[i, j] <- 2
+      }
+      
     }
   }
   res

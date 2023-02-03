@@ -52,9 +52,9 @@ zmat.soren <- vegdist(zoop.pa, method = "bray", binary = TRUE)
 zmat.bcd <- vegdist(zoop.log, method = "bray")
 zmat.lchord <- dist(zoop.logchord)
 
-zmat.pcoa.soren <- pcoa(sqrt(zmat.soren)) 
-zmat.pcoa.bcd <- pcoa(sqrt(zmat.bcd)) 
-zmat.pcoa.lchord <- pcoa(zmat.lchord)
+# zmat.pcoa.soren <- pcoa(sqrt(zmat.soren)) 
+# zmat.pcoa.bcd <- pcoa(sqrt(zmat.bcd)) 
+# zmat.pcoa.lchord <- pcoa(zmat.lchord)
 
 ```
 
